@@ -3,10 +3,13 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ThemeProvider } from './context/ThemeContext';
 import { ToastProvider } from './context/ToastContext';
+import { AuthProvider } from './context/AuthContext';
 
 // Layout & Core Pages
 import { AppShell } from './components/layout/AppShell';
 import { LandingPage } from './pages/LandingPage';
+import { LoginPage } from './pages/LoginPage';
+import { SignupPage } from './pages/SignupPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { ProjectsPage } from './pages/ProjectsPage';
 import { ProjectWorkspacePage } from './pages/ProjectWorkspacePage';
@@ -32,39 +35,43 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
-        <ToastProvider>
-          <BrowserRouter>
-            <Routes>
-              {/* Public Marketing Route */}
-              <Route path="/" element={<LandingPage />} />
+        <AuthProvider>
+          <ToastProvider>
+            <BrowserRouter>
+              <Routes>
+                {/* Public Marketing Route */}
+                <Route path="/" element={<LandingPage />} />
+                <Route path="/login" element={<LoginPage />} />
+                <Route path="/signup" element={<SignupPage />} />
 
-              {/* Authenticated App Routes wrapped in the Sidebar Shell */}
-              <Route element={<AppShell />}>
-                <Route path="/dashboard" element={<DashboardPage />} />
-                <Route path="/projects" element={<ProjectsPage />} />
-                
-                {/* Global detail views independent of active project tab */}
-                <Route path="/papers/:paperId" element={<PaperDetailsPage />} />
-                <Route path="/gaps/:gapId" element={<GapDetailsPage />} />
+                {/* Authenticated App Routes wrapped in the Sidebar Shell */}
+                <Route element={<AppShell />}>
+                  <Route path="/dashboard" element={<DashboardPage />} />
+                  <Route path="/projects" element={<ProjectsPage />} />
 
-                {/* Nested Project Workspace Routes */}
-                <Route path="/projects/:projectId" element={<ProjectWorkspacePage />}>
-                  <Route index element={<Navigate to="papers" replace />} />
-                  <Route path="upload" element={<UploadPage />} />
-                  <Route path="papers" element={<PapersPage />} />
-                  <Route path="search" element={<SearchPage />} />
-                  <Route path="landscape" element={<LandscapePage />} />
-                  <Route path="compare" element={<ComparePage />} />
-                  <Route path="contradictions" element={<ContradictionsPage />} />
-                  <Route path="gaps" element={<GapsPage />} />
-                  <Route path="reports" element={<ReportsPage />} />
+                  {/* Global detail views independent of active project tab */}
+                  <Route path="/papers/:paperId" element={<PaperDetailsPage />} />
+                  <Route path="/gaps/:gapId" element={<GapDetailsPage />} />
+
+                  {/* Nested Project Workspace Routes */}
+                  <Route path="/projects/:projectId" element={<ProjectWorkspacePage />}>
+                    <Route index element={<Navigate to="papers" replace />} />
+                    <Route path="upload" element={<UploadPage />} />
+                    <Route path="papers" element={<PapersPage />} />
+                    <Route path="search" element={<SearchPage />} />
+                    <Route path="landscape" element={<LandscapePage />} />
+                    <Route path="compare" element={<ComparePage />} />
+                    <Route path="contradictions" element={<ContradictionsPage />} />
+                    <Route path="gaps" element={<GapsPage />} />
+                    <Route path="reports" element={<ReportsPage />} />
+                  </Route>
+
+                  <Route path="*" element={<NotFoundPage />} />
                 </Route>
-
-                <Route path="*" element={<NotFoundPage />} />
-              </Route>
-            </Routes>
-          </BrowserRouter>
-        </ToastProvider>
+              </Routes>
+            </BrowserRouter>
+          </ToastProvider>
+        </AuthProvider>
       </ThemeProvider>
     </QueryClientProvider>
   );

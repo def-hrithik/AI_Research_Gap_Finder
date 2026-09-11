@@ -18,14 +18,15 @@ export const NavBar: React.FC = () => {
         <div className="hidden md:flex items-center gap-8 text-sm font-medium text-secondary">
           <a href="#product" className="hover:text-primary transition-colors">Product</a>
           <a href="#how-it-works" className="hover:text-primary transition-colors">How it Works</a>
+          <a href="#pricing" className="hover:text-primary transition-colors">Pricing</a>
         </div>
 
         <div className="flex items-center gap-4">
           <ThemeToggle />
-          <Link to="/dashboard" className="hidden sm:block">
+          <Link to="/login" className="hidden sm:block">
             <Button variant="ghost">Log In</Button>
           </Link>
-          <Link to="/dashboard">
+          <Link to="/signup">
             <Button className="rounded-full shadow-md">Get Started</Button>
           </Link>
         </div>

@@ -1,5 +1,6 @@
 import React from 'react';
 import { Layers } from 'lucide-react';
+import { InteractiveGraph } from './InteractiveGraph';
 
 export const ProblemSection: React.FC = () => {
   return (
@@ -21,9 +22,9 @@ export const ProblemSection: React.FC = () => {
         </div>
         <div className="relative aspect-square md:aspect-auto md:h-[500px] bg-surface-raised rounded-3xl border border-border shadow-md overflow-hidden flex items-center justify-center">
           <div className="absolute inset-0 bg-gradient-to-br from-accent/5 to-transparent"></div>
-          {/* Abstract visual representation of papers connecting */}
-          <div className="relative z-10 text-center text-secondary p-8 border border-dashed border-border rounded-xl bg-surface">
-            [ Interactive Graph Visualization Placeholder ]
+          {/* Interactive Graph Visualization */}
+          <div className="relative z-10 w-full h-full p-6">
+            <InteractiveGraph />
           </div>
         </div>
       </div>

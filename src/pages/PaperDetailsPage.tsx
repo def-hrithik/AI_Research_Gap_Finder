@@ -8,6 +8,26 @@ import { Badge } from '../components/common/Badge';
 import { LoadingState } from '../components/common/LoadingState';
 import { ErrorState } from '../components/common/ErrorState';
 
+interface AnalysisSectionProps {
+  title: string;
+  content: React.ReactNode;
+  type?: 'AI Analysis' | 'Direct Evidence';
+}
+
+const AnalysisSection: React.FC<AnalysisSectionProps> = ({ title, content, type = 'AI Analysis' }) => (
+  <div className="border-b border-border py-6 last:border-0">
+    <div className="flex items-center justify-between mb-4">
+      <h3 className="text-lg font-bold text-primary">{title}</h3>
+      <Badge variant={type === 'Direct Evidence' ? 'success' : 'accent'}>
+        {type === 'Direct Evidence' ? <><ShieldCheck size={12} className="mr-1"/> Direct Evidence</> : 'AI Analysis'}
+      </Badge>
+    </div>
+    <div className="text-secondary leading-relaxed space-y-2">
+      {content}
+    </div>
+  </div>
+);
+
 export const PaperDetailsPage: React.FC = () => {
   const { paperId } = useParams<{ paperId: string }>();
   const navigate = useNavigate();
@@ -35,20 +55,6 @@ export const PaperDetailsPage: React.FC = () => {
     );
   }
 
-  const AnalysisSection = ({ title, content, type = 'AI Analysis' }: { title: string, content: React.ReactNode, type?: 'AI Analysis' | 'Direct Evidence' }) => (
-    <div className="border-b border-border py-6 last:border-0">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-bold text-primary">{title}</h3>
-        <Badge variant={type === 'Direct Evidence' ? 'success' : 'accent'}>
-          {type === 'Direct Evidence' ? <><ShieldCheck size={12} className="mr-1"/> Direct Evidence</> : 'AI Analysis'}
-        </Badge>
-      </div>
-      <div className="text-secondary leading-relaxed space-y-2">
-        {content}
-      </div>
-    </div>
-  );
-
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       <Button variant="ghost" onClick={() => navigate(-1)} className="gap-2 px-0 hover:bg-transparent text-secondary hover:text-primary">
@@ -61,7 +67,7 @@ export const PaperDetailsPage: React.FC = () => {
           <Card className="p-8">
             <h1 className="text-2xl font-extrabold text-primary mb-4 leading-tight">{paper.title}</h1>
             <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-secondary mb-8 border-b border-border pb-6">
-              <span className="font-semibold text-primary">{paper.authors.join(', ')}</span>
+              <span className="font-semibold text-primary">{paper.authors?.length ? paper.authors.join(', ') : 'Unknown Authors'}</span>
               <span>{paper.venue}</span>
               <span>{paper.year}</span>
             </div>
@@ -84,7 +90,7 @@ export const PaperDetailsPage: React.FC = () => {
               title="Models & Architecture" 
               content={
                 <div className="flex flex-wrap gap-2">
-                  {paper.analysis.models.map((m, i) => <Badge key={i} variant="outline">{m}</Badge>)}
+                  {(paper.analysis.models || []).map((m, i) => <Badge key={i} variant="outline">{m}</Badge>)}
                 </div>
               } 
             />
@@ -94,7 +100,7 @@ export const PaperDetailsPage: React.FC = () => {
               type="Direct Evidence"
               content={
                 <div className="flex flex-wrap gap-2">
-                  {paper.analysis.dataset.map((d, i) => <Badge key={i} variant="outline">{d}</Badge>)}
+                  {(paper.analysis.dataset || []).map((d, i) => <Badge key={i} variant="outline">{d}</Badge>)}
                 </div>
               } 
             />
@@ -109,7 +115,7 @@ export const PaperDetailsPage: React.FC = () => {
               type="Direct Evidence"
               content={
                 <ul className="list-disc pl-5 space-y-2">
-                  {paper.analysis.limitations.map((l, i) => <li key={i}>{l}</li>)}
+                  {(paper.analysis.limitations || []).map((l, i) => <li key={i}>{l}</li>)}
                 </ul>
               } 
             />
@@ -119,7 +125,7 @@ export const PaperDetailsPage: React.FC = () => {
               type="Direct Evidence"
               content={
                 <ul className="list-disc pl-5 space-y-2">
-                  {paper.analysis.futureWork.map((fw, i) => <li key={i}>{fw}</li>)}
+                  {(paper.analysis.futureWork || []).map((fw, i) => <li key={i}>{fw}</li>)}
                 </ul>
               } 
             />
@@ -139,7 +145,12 @@ export const PaperDetailsPage: React.FC = () => {
                 <span className="block text-secondary font-semibold uppercase tracking-wider text-xs mb-1">Internal ID</span>
                 <span className="text-primary font-mono bg-surface-raised px-2 py-1 rounded-md border border-border">{paper.id}</span>
               </div>
-              <Button variant="secondary" fullWidth className="gap-2 mt-4">
+              <Button 
+                variant="secondary" 
+                fullWidth 
+                className="gap-2 mt-4"
+                onClick={() => window.open(`/api/papers/${paper.id}/file`, '_blank')}
+              >
                 View Source PDF <ExternalLink size={16} />
               </Button>
             </div>

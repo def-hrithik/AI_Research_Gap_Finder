@@ -1,0 +1,18 @@
+# Pyrefly configuration for AI Research Gap Finder backend
+# See: https://pyrefly.org/docs/configuration
+
+[project]
+python_version = "3.11"
+search_path = ["."]
+
+# Ignore missing stubs for third-party libraries
+[[tool.pyrefly.ignore]]
+# Common third-party packages without type stubs
+modules = [
+    "fitz",
+    "rank_bm25",
+    "sentence_transformers",
+    "qdrant_client",
+    "qdrant_client.http",
+    "qdrant_client.http.models",
+]

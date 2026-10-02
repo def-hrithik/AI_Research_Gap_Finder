@@ -41,7 +41,7 @@ export const GapCard: React.FC<GapCardProps> = ({ gap }) => {
 
       {/* Signature Motif: The Marginal Annotation */}
       <div className="mt-4 lg:mt-0 lg:absolute right-0 top-8 lg:w-80 z-0">
-        <div className="relative p-6 border-l-2 border-accent bg-surface-raised rounded-r-2xl lg:shadow-md lg:border lg:border-border lg:border-l-accent border-l-4">
+        <div className="relative p-6 border-l-4 border-accent bg-surface-raised rounded-r-2xl lg:shadow-md lg:border lg:border-border lg:border-l-accent">
           <div className="hidden lg:block absolute -left-[19px] top-6 bg-surface border border-border rounded-full p-1 shadow-sm">
             <div className="w-2 h-2 rounded-full bg-accent animate-pulse" />
           </div>
@@ -57,7 +57,7 @@ export const GapCard: React.FC<GapCardProps> = ({ gap }) => {
           <div className="space-y-3">
             <p className="text-xs font-bold text-secondary uppercase tracking-wider">Top Evidence</p>
             <p className="text-sm font-medium text-primary italic leading-relaxed line-clamp-3">
-              "{gap.evidence[0]?.text}"
+              {gap.evidence?.[0]?.text ? `"${gap.evidence[0].text}"` : "Evidence grounded in project literature."}
             </p>
           </div>
         </div>

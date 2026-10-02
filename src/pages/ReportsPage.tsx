@@ -1,12 +1,17 @@
 import React, { useState } from 'react';
-import { FileDown, CheckSquare, Square, Loader2 } from 'lucide-react';
+import { useParams } from 'react-router-dom';
+import { FileDown, CheckSquare, Square, Loader2, Download } from 'lucide-react';
 import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { useToast } from '../context/ToastContext';
+import { api } from '../services/api';
 
 export const ReportsPage: React.FC = () => {
+  const { projectId } = useParams<{ projectId: string }>();
   const { addToast } = useToast();
   const [isGenerating, setIsGenerating] = useState(false);
+  const [reportMarkdown, setReportMarkdown] = useState<string | null>(null);
+
   const [sections, setSections] = useState({
     landscape: true, topics: true, methods: true, 
     datasets: true, limitations: true, futureWork: true,
@@ -17,19 +22,56 @@ export const ReportsPage: React.FC = () => {
     setSections(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
-  const handleGenerate = () => {
+  const downloadFile = (content: string, filename: string) => {
+    const blob = new Blob([content], { type: 'text/markdown;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleGenerate = async () => {
+    if (!projectId) return;
     setIsGenerating(true);
-    setTimeout(() => {
-      setIsGenerating(false);
+    try {
+      const res = await api.generateReport(projectId);
+      setReportMarkdown(res.markdown);
       addToast('Report generated successfully! Download started.', 'success');
-    }, 2500);
+      if (res.markdown) {
+        downloadFile(res.markdown, `research-report-${projectId}.md`);
+      }
+    } catch (err: any) {
+      console.error('Failed to generate report:', err);
+      addToast(err?.response?.data?.error?.message || 'Failed to generate report', 'error');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleDownloadExisting = async () => {
+    if (!projectId) return;
+    try {
+      const res = await api.getReports(projectId);
+      if (res.markdown) {
+        downloadFile(res.markdown, `research-report-${projectId}.md`);
+        addToast('Report downloaded successfully.', 'success');
+      } else {
+        await handleGenerate();
+      }
+    } catch (err) {
+      await handleGenerate();
+    }
   };
 
   return (
     <div className="max-w-4xl mx-auto animate-in fade-in duration-300">
       <div className="mb-8">
         <h2 className="text-2xl font-bold text-primary mb-2">Export Research Report</h2>
-        <p className="text-secondary">Generate a comprehensive HTML or text summary of your project workspace findings.</p>
+        <p className="text-secondary">Generate a comprehensive, evidence-grounded markdown summary of your project literature findings.</p>
       </div>
 
       <div className="grid md:grid-cols-2 gap-8">
@@ -59,19 +101,28 @@ export const ReportsPage: React.FC = () => {
           </div>
           <h3 className="text-xl font-bold text-primary mb-2">Generate Output</h3>
           <p className="text-secondary text-sm mb-8 leading-relaxed px-4">
-            The report will aggregate evidence across all selected sections, complete with traceable page citations.
+            The report aggregates evidence across all selected sections, complete with traceable paper citations and candidate research gaps.
           </p>
           
           <div className="flex flex-col w-full gap-3 px-4">
             <Button onClick={handleGenerate} disabled={isGenerating} size="lg" className="shadow-md">
-              {isGenerating ? <><Loader2 size={18} className="animate-spin mr-2"/> Compiling Report...</> : 'Generate HTML Report'}
+              {isGenerating ? <><Loader2 size={18} className="animate-spin mr-2"/> Compiling Report...</> : 'Generate & Download Report'}
             </Button>
-            <Button variant="secondary" onClick={handleGenerate} disabled={isGenerating}>
-              Download Raw Text
+            <Button variant="secondary" onClick={handleDownloadExisting} disabled={isGenerating} className="gap-2">
+              <Download size={16} /> Download Raw Markdown
             </Button>
           </div>
         </Card>
       </div>
+
+      {reportMarkdown && (
+        <Card className="mt-8 p-6">
+          <h3 className="font-bold text-primary mb-4">Report Preview</h3>
+          <pre className="p-4 bg-background rounded-xl border border-border text-xs text-secondary overflow-x-auto whitespace-pre-wrap font-mono max-h-96">
+            {reportMarkdown}
+          </pre>
+        </Card>
+      )}
     </div>
   );
 };

@@ -35,7 +35,9 @@ export const ComparisonTable: React.FC<ComparisonTableProps> = ({ papers }) => {
             {papers.map((paper) => (
               <th key={paper.id} className="p-4 min-w-[300px] align-top">
                 <div className="font-bold text-primary text-sm mb-1">{paper.title}</div>
-                <div className="text-xs text-secondary font-normal">{paper.authors[0]} et al., {paper.year}</div>
+                <div className="text-xs text-secondary font-normal">
+                  {paper.authors?.length ? `${paper.authors[0]} et al.` : 'Unknown authors'}, {paper.year}
+                </div>
               </th>
             ))}
           </tr>

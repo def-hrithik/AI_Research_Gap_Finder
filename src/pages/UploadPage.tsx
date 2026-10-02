@@ -1,15 +1,18 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { UploadDropzone } from '../components/papers/UploadDropzone';
 import { UploadFileRow } from '../components/papers/UploadFileRow';
 import type { UploadFile } from '../components/papers/UploadFileRow';
 import { Button } from '../components/common/Button';
 import { useToast } from '../context/ToastContext';
+import { api } from '../services/api';
 
 export const UploadPage: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
   const { addToast } = useToast();
+  const queryClient = useQueryClient();
   const [files, setFiles] = useState<UploadFile[]>([]);
   const [isProcessingAll, setIsProcessingAll] = useState(false);
 
@@ -18,7 +21,7 @@ export const UploadPage: React.FC = () => {
       id: Math.random().toString(36).substring(7),
       file,
       progress: 0,
-      status: 'Ready' as const
+      status: 'Ready' as const,
     }));
     setFiles(prev => [...prev, ...fileObjects]);
   };
@@ -27,48 +30,64 @@ export const UploadPage: React.FC = () => {
     setFiles(prev => prev.filter(f => f.id !== id));
   };
 
-  const handleUploadAndProcess = () => {
+  const pollJobUntilDone = async (jobId: string, fileId: string): Promise<boolean> => {
+    const maxAttempts = 60; // 90 seconds max
+    for (let i = 0; i < maxAttempts; i++) {
+      await new Promise(r => setTimeout(r, 1500));
+      try {
+        const job = await api.getJob(jobId);
+        const progress = Math.min(95, Math.max(20, Math.round((job.progress || 0.2) * 100)));
+        setFiles(prev => prev.map(f => f.id === fileId ? { ...f, progress, status: 'Processing' } : f));
+
+        if (job.status === 'SUCCEEDED') {
+          setFiles(prev => prev.map(f => f.id === fileId ? { ...f, progress: 100, status: 'Completed' } : f));
+          return true;
+        } else if (job.status === 'FAILED' || job.status === 'CANCELLED') {
+          setFiles(prev => prev.map(f => f.id === fileId ? { ...f, status: 'Failed' } : f));
+          return false;
+        }
+      } catch (e) {
+        console.error('Job polling error:', e);
+      }
+    }
+    setFiles(prev => prev.map(f => f.id === fileId ? { ...f, status: 'Failed' } : f));
+    return false;
+  };
+
+  const handleUploadAndProcess = async () => {
+    if (!projectId) return;
     setIsProcessingAll(true);
-    
-    // Simulate upload and processing for each file
-    files.forEach((file, index) => {
-      if (file.status === 'Completed' || file.status === 'Failed') return;
 
-      setTimeout(() => {
-        setFiles(prev => prev.map(f => f.id === file.id ? { ...f, status: 'Uploading', progress: 10 } : f));
+    const pendingFiles = files.filter(f => f.status === 'Ready' || f.status === 'Failed');
+    let anySuccess = false;
+
+    for (const f of pendingFiles) {
+      try {
+        setFiles(prev => prev.map(item => item.id === f.id ? { ...item, status: 'Uploading', progress: 10 } : item));
         
-        let progress = 10;
-        const uploadInterval = setInterval(() => {
-          progress += Math.random() * 20;
-          if (progress >= 100) {
-            clearInterval(uploadInterval);
-            setFiles(prev => prev.map(f => f.id === file.id ? { ...f, status: 'Processing', progress: 100 } : f));
-            
-            // Simulate AI processing phase
-            setTimeout(() => {
-              const success = Math.random() > 0.1; // 90% success rate
-              setFiles(prev => prev.map(f => f.id === file.id ? { 
-                ...f, 
-                status: success ? 'Completed' : 'Failed' 
-              } : f));
+        const uploadRes = await api.uploadPaper(projectId, f.file);
+        setFiles(prev => prev.map(item => item.id === f.id ? { ...item, status: 'Processing', progress: 30 } : item));
 
-              // Check if all are done
-              setFiles(currentFiles => {
-                const allDone = currentFiles.every(cf => cf.status === 'Completed' || cf.status === 'Failed');
-                if (allDone) {
-                  setIsProcessingAll(false);
-                  addToast('Processing complete. Papers have been added to your workspace.', 'success');
-                }
-                return currentFiles;
-              });
+        const success = await pollJobUntilDone(uploadRes.job_id, f.id);
+        if (success) anySuccess = true;
+      } catch (err: any) {
+        console.error(`Failed to upload ${f.file.name}:`, err);
+        setFiles(prev => prev.map(item => item.id === f.id ? { ...item, status: 'Failed' } : item));
+        addToast(err?.response?.data?.error?.message || `Failed to process ${f.file.name}`, 'error');
+      }
+    }
 
-            }, 2000 + Math.random() * 2000);
-          } else {
-            setFiles(prev => prev.map(f => f.id === file.id ? { ...f, progress } : f));
-          }
-        }, 300);
-      }, index * 500); // Stagger start times
-    });
+    setIsProcessingAll(false);
+
+    if (anySuccess) {
+      await queryClient.invalidateQueries({ queryKey: ['papers', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['project', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['projects'] });
+      await queryClient.invalidateQueries({ queryKey: ['gaps', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['contradictions', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['landscape', projectId] });
+      addToast('Papers uploaded and processed into vector index successfully.', 'success');
+    }
   };
 
   return (
@@ -93,7 +112,7 @@ export const UploadPage: React.FC = () => {
               onClick={handleUploadAndProcess}
               disabled={isProcessingAll || files.every(f => f.status === 'Completed')}
             >
-              {isProcessingAll ? 'Processing...' : 'Process All Papers'}
+              {isProcessingAll ? 'Processing Literature...' : 'Process All Papers'}
             </Button>
           </div>
           

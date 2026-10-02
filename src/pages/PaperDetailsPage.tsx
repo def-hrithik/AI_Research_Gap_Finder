@@ -8,6 +8,26 @@ import { Badge } from '../components/common/Badge';
 import { LoadingState } from '../components/common/LoadingState';
 import { ErrorState } from '../components/common/ErrorState';
 
+interface AnalysisSectionProps {
+  title: string;
+  content: React.ReactNode;
+  type?: 'AI Analysis' | 'Direct Evidence';
+}
+
+const AnalysisSection: React.FC<AnalysisSectionProps> = ({ title, content, type = 'AI Analysis' }) => (
+  <div className="border-b border-border py-6 last:border-0">
+    <div className="flex items-center justify-between mb-4">
+      <h3 className="text-lg font-bold text-primary">{title}</h3>
+      <Badge variant={type === 'Direct Evidence' ? 'success' : 'accent'}>
+        {type === 'Direct Evidence' ? <><ShieldCheck size={12} className="mr-1"/> Direct Evidence</> : 'AI Analysis'}
+      </Badge>
+    </div>
+    <div className="text-secondary leading-relaxed space-y-2">
+      {content}
+    </div>
+  </div>
+);
+
 export const PaperDetailsPage: React.FC = () => {
   const { paperId } = useParams<{ paperId: string }>();
   const navigate = useNavigate();
@@ -34,20 +54,6 @@ export const PaperDetailsPage: React.FC = () => {
       </div>
     );
   }
-
-  const AnalysisSection = ({ title, content, type = 'AI Analysis' }: { title: string, content: React.ReactNode, type?: 'AI Analysis' | 'Direct Evidence' }) => (
-    <div className="border-b border-border py-6 last:border-0">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-bold text-primary">{title}</h3>
-        <Badge variant={type === 'Direct Evidence' ? 'success' : 'accent'}>
-          {type === 'Direct Evidence' ? <><ShieldCheck size={12} className="mr-1"/> Direct Evidence</> : 'AI Analysis'}
-        </Badge>
-      </div>
-      <div className="text-secondary leading-relaxed space-y-2">
-        {content}
-      </div>
-    </div>
-  );
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">

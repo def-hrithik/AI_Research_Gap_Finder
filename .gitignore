@@ -115,3 +115,9 @@ data/hf/
 data/uploads/*
 !data/uploads/.gitkeep
 
+# ============================================================
+# Internal Documentation & Specifications
+# ============================================================
+docs/
+
+

@@ -23,8 +23,19 @@
 
 ---
 
+## 📚 Technical Documentation
+
+Comprehensive architectural specifications and subsystem documentation:
+
+- [RAG Model](./RAGMODEL.md) — Complete RAG pipeline and AI retrieval system
+- [System Architecture](./SYSTEMARCHITECTURE.md) — Complete system architecture and data flow
+- [Backend](./BACKEND.md) — Backend APIs, services, database, and implementation
+
+---
+
 ## 📋 Table of Contents
 
+- [Technical Documentation](#-technical-documentation)
 - [1. Executive Summary](#1-executive-summary)
 - [2. Problem Statement](#2-problem-statement)
 - [3. Key Features](#3-key-features)

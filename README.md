@@ -237,33 +237,38 @@ graph LR
 ```mermaid
 sequenceDiagram
     autonumber
+
     actor User
-    participant Router as FastAPI Router (/api/*)
+    participant Router as FastAPI Router
     participant Dep as Dependency Injection
     participant Service as Domain Service
     participant Repo as DB Repositories
     participant Storage as SQLite / Qdrant
     participant LLM as AI Inference Engine
 
-    User->>Router: POST /api/projects/{id}/papers/upload (multipart PDF)
-    Router->>Dep: Validate project_id & upload size limits
-    Router->>Service: Stream upload to disk (magic byte check)
-    Service->>Repo: Create Paper record (status=UPLOADED)
-    Service->>Repo: Enqueue Ingestion Job
-    Router-->>User: 202 Accepted {job_id, paper_id}
+    User->>Router: POST paper upload
+    Router->>Dep: Validate project and upload limits
+    Router->>Service: Stream PDF to disk
+    Service->>Repo: Create paper record
+    Service->>Repo: Enqueue ingestion job
+    Router-->>User: 202 Accepted
 
-    Note over Service,Storage: Async Background Worker Executes Ingestion
-    Service->>Storage: Read PDF stream & parse layout (PyMuPDF)
-    Service->>Service: Detect canonical sections & sentence chunks
-    Service->>Storage: Batch upsert 1024-dim dense vectors to Qdrant
-    Service->>Repo: Batch insert Chunk entities to SQLite
-    Service->>Service: Extract structured analysis (problem, limitations)
-    Service->>Repo: Save PaperAnalysis entity; update Paper status=ANALYZED
-    Service->>Repo: Mark Job as SUCCEEDED (progress=1.0)
+    Note over Service,Storage: Background worker executes ingestion
 
-    User->>Router: GET /api/jobs/{job_id}
+    Service->>Storage: Read stored PDF
+    Service->>Service: Extract text from PDF
+    Service->>Service: Detect content and enforce chunk limits
+    Service->>Storage: Store chunks in SQLite
+    Service->>LLM: Generate embeddings
+    LLM-->>Service: Return embeddings
+    Service->>Storage: Upsert vectors into Qdrant
+    Service->>Repo: Update paper status to ANALYZED
+    Service->>Repo: Mark job as SUCCEEDED
+
+    User->>Router: GET job status
     Router->>Repo: Query job status
-    Router-->>User: 200 OK {status: "SUCCEEDED", progress: 1.0}
+    Repo-->>Router: Return job status
+    Router-->>User: 200 OK
 ```
 
 ---

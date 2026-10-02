@@ -288,28 +288,29 @@ class ResearchGapLLM(BaseModel):
 ```mermaid
 sequenceDiagram
     autonumber
+
     actor Client as Frontend UI
-    participant API as Search API (/api/projects/{id}/search)
+    participant API as Search API
     participant Qdrant as Qdrant Vector DB
     participant BM25 as In-Memory BM25 Index
     participant Rerank as Cross-Encoder Reranker
     participant LLM as Inference Engine
     participant Verifier as Text Normalizer
 
-    Client->>API: POST /api/projects/{id}/search {query: "calibration bias"}
-    API->>Qdrant: Query dense vectors (filtered by project_id)
-    Qdrant-->>API: 40 Dense Candidates
+    Client->>API: POST literature search query
+    API->>Qdrant: Query dense vectors filtered by project
+    Qdrant-->>API: Return dense candidates
     API->>BM25: Query token frequencies
-    BM25-->>API: 40 Lexical Candidates
-    API->>API: Compute RRF(k=60) + Apply Section Boosts
-    API->>Rerank: Evaluate Top 50 candidates through Cross-Encoder
-    Rerank-->>API: Reranked candidates + blended scores
-    API->>API: Allocate context budget (Max 6,000 tokens)
-    API->>LLM: Prompt with query + structured evidence excerpts
-    LLM-->>API: Generated answer with embedded citations
+    BM25-->>API: Return lexical candidates
+    API->>API: Compute reciprocal rank fusion and section boosts
+    API->>Rerank: Evaluate candidate chunks through cross-encoder
+    Rerank-->>API: Return reranked candidates and blended scores
+    API->>API: Allocate context budget
+    API->>LLM: Prompt with query and structured evidence excerpts
+    LLM-->>API: Return generated answer with embedded citations
     API->>Verifier: Check citations via Unicode NFKC substring match
     Verifier-->>API: Attach verified status flags
-    API-->>Client: 200 OK SearchResponse {answer, sources, citations}
+    API-->>Client: 200 OK with grounded answer and citations
 ```
 
 ---

@@ -61,7 +61,7 @@ graph TD
     end
 
     subgraph ServiceTier ["3. Application Service Tier (FastAPI)"]
-        Controllers["FastAPI Route Controllers (/api/*)"]
+        Controllers["FastAPI Route Controllers"]
         Middleware["CORS, Telemetry & Request-ID Middleware"]
         JobManager["In-Process Asyncio Job Runner"]
         
@@ -316,32 +316,31 @@ Nexus AI integrates specialized neural models for each stage of the comprehensio
 ```mermaid
 sequenceDiagram
     autonumber
+
     actor User as Researcher
     participant SPA as Web Client
-    participant Router as API Gateway (/api)
+    participant Router as API Gateway
     participant Ingest as Ingestion Service
     participant Qdrant as Qdrant Vector Store
     participant DB as Relational Database
 
-    User->>SPA: Selects & uploads PDF file
-    SPA->>Router: POST /api/projects/{id}/papers/upload (multipart)
-    Router->>Ingest: Stream file to disk (magic byte check)
-    Ingest->>DB: Insert Paper (status=UPLOADED)
-    Ingest->>DB: Enqueue Job (status=QUEUED)
-    Router-->>SPA: 202 Accepted {job_id, paper_id}
+    User->>SPA: Selects and uploads PDF file
+    SPA->>Router: POST paper upload endpoint
+    Router->>Ingest: Stream file to disk
+    Ingest->>DB: Insert paper record as UPLOADED
+    Ingest->>DB: Enqueue job record as QUEUED
+    Router-->>SPA: 202 Accepted with job and paper identifiers
 
-    Note over Ingest,Qdrant: Asynchronous Background Processing
-    Ingest->>Ingest: Layout parsing & 2-column detection
-    Ingest->>Ingest: Section classification & chunk generation
+    Note over Ingest,Qdrant: Asynchronous background processing
+    Ingest->>Ingest: Layout parsing and 2-column detection
+    Ingest->>Ingest: Section classification and chunk generation
     Ingest->>Qdrant: Upsert 1024-dim dense vectors
-    Ingest->>DB: Insert Chunks & PaperAnalysis records
-    Ingest->>DB: Update Paper (status=ANALYZED) & Job (status=SUCCEEDED)
+    Ingest->>DB: Insert chunks and paper analysis records
+    Ingest->>DB: Update paper to ANALYZED and mark job SUCCEEDED
 
-    loop Every 1.5 seconds
-        SPA->>Router: GET /api/jobs/{job_id}
-        Router-->>SPA: 200 OK {status: "SUCCEEDED", progress: 1.0}
-    end
-    SPA->>User: Displays Paper in Table & Updates Landscape
+    SPA->>Router: GET job status endpoint
+    Router-->>SPA: 200 OK with job succeeded status
+    SPA->>User: Display paper in table and update landscape
 ```
 
 ---
@@ -365,8 +364,8 @@ graph TD
     end
 
     subgraph Volumes ["Persistent Storage Volumes"]
-        VolData[("backend_data -> /app/data")]
-        VolQdrant[("qdrant_storage -> /qdrant/storage")]
+        VolData[("backend_data to /app/data")]
+        VolQdrant[("qdrant_storage to /qdrant/storage")]
     end
 
     Port3000 --> FrontendContainer

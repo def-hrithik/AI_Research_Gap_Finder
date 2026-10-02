@@ -22,7 +22,7 @@ export const PaperTable: React.FC<{ papers: Paper[] }> = ({ papers }) => {
             <tr key={paper.id} className="hover:bg-surface-raised transition-colors group cursor-pointer">
               <td className="px-6 py-4 max-w-[400px]">
                 <div className="font-bold text-primary truncate mb-1">{paper.title}</div>
-                <div className="text-xs text-secondary truncate">{paper.authors.join(', ')}</div>
+                <div className="text-xs text-secondary truncate">{paper.authors?.length ? paper.authors.join(', ') : 'Unknown Authors'}</div>
               </td>
               <td className="px-6 py-4 text-secondary">{paper.venue}</td>
               <td className="px-6 py-4 text-secondary font-medium">{paper.year}</td>

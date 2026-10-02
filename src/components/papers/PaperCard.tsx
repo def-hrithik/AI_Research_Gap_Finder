@@ -19,7 +19,7 @@ export const PaperCard: React.FC<{ paper: Paper }> = ({ paper }) => {
           {paper.abstract}
         </p>
         <div className="flex flex-wrap gap-4 pt-4 border-t border-border text-xs font-semibold text-secondary uppercase tracking-wider">
-          <div className="flex items-center gap-1.5"><FileText size={14} /> {paper.authors[0]} et al.</div>
+          <div className="flex items-center gap-1.5"><FileText size={14} /> {paper.authors?.length ? `${paper.authors[0]} et al.` : 'Unknown'}</div>
           <div className="flex items-center gap-1.5"><Calendar size={14} /> {paper.year}</div>
           <div className="flex items-center gap-1.5"><BookOpen size={14} /> {paper.venue}</div>
         </div>

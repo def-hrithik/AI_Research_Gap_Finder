@@ -35,10 +35,10 @@ export const DashboardPage: React.FC = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2">
-          <ActivityChart />
+          <ActivityChart projects={projects || []} />
         </div>
         <div>
-          <TopicDistributionChart />
+          <TopicDistributionChart projects={projects || []} />
         </div>
       </div>
 
@@ -47,7 +47,7 @@ export const DashboardPage: React.FC = () => {
           <RecentProjects projects={projects || []} />
         </div>
         <div>
-          <ActivityFeed />
+          <ActivityFeed projects={projects || []} />
         </div>
       </div>
     </div>

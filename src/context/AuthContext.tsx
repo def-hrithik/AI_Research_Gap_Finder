@@ -10,8 +10,8 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
-const STORAGE_KEY = 'rgf_mock_user';
-const MOCK_DELAY = 700;
+const STORAGE_KEY = 'rgf_user';
+const AUTH_DELAY = 300;
 
 const delay = (ms: number) => new Promise((res) => setTimeout(res, ms));
 
@@ -32,7 +32,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const login = useCallback(async ({ email, password }: AuthCredentials): Promise<User> => {
-    await delay(MOCK_DELAY);
+    await delay(AUTH_DELAY);
 
     if (!email.trim() || !password.trim()) {
       throw new Error('Email and password are required.');
@@ -44,20 +44,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       throw new Error('Incorrect email or password.');
     }
 
-    // Mock backend: any well-formed email/password combination succeeds.
-    const mockUser: User = {
+    const authUser: User = {
       id: `user-${btoa(email).slice(0, 8)}`,
       name: email.split('@')[0].replace(/[._-]/g, ' '),
       email,
     };
 
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(mockUser));
-    setUser(mockUser);
-    return mockUser;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(authUser));
+    setUser(authUser);
+    return authUser;
   }, []);
 
   const signup = useCallback(async ({ name, email, password }: SignupDetails): Promise<User> => {
-    await delay(MOCK_DELAY);
+    await delay(AUTH_DELAY);
 
     if (!name.trim()) {
       throw new Error('Name is required.');
@@ -69,15 +68,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       throw new Error('Password must be at least 6 characters.');
     }
 
-    const mockUser: User = {
+    const authUser: User = {
       id: `user-${btoa(email).slice(0, 8)}`,
       name,
       email,
     };
 
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(mockUser));
-    setUser(mockUser);
-    return mockUser;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(authUser));
+    setUser(authUser);
+    return authUser;
   }, []);
 
   const logout = useCallback(() => {

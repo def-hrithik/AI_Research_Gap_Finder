@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
 import { useToast } from '../../context/ToastContext';
+import { api } from '../../services/api';
 
 interface CreateProjectModalProps {
   isOpen: boolean;
@@ -13,18 +15,27 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({ isOpen, 
   const [description, setDescription] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const { addToast } = useToast();
+  const queryClient = useQueryClient();
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     if (!name.trim()) return;
     setIsLoading(true);
-    // Mock API call
-    setTimeout(() => {
-      setIsLoading(false);
+    try {
+      await api.createProject({
+        name: name.trim(),
+        description: description.trim() || undefined,
+      });
+      await queryClient.invalidateQueries({ queryKey: ['projects'] });
       addToast('Project created successfully', 'success');
-      onClose();
       setName('');
       setDescription('');
-    }, 800);
+      onClose();
+    } catch (err: any) {
+      console.error('Failed to create project:', err);
+      addToast(err?.response?.data?.error?.message || 'Failed to create project', 'error');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (

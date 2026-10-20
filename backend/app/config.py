@@ -9,6 +9,10 @@ from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+_BACKEND_DIR = Path(__file__).resolve().parent.parent
+_ENV_FILE = _BACKEND_DIR / ".env"
+
+
 class Settings(BaseSettings):
     """All env-configurable settings from 08 §9.1.
 
@@ -17,7 +21,7 @@ class Settings(BaseSettings):
     """
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(_ENV_FILE, ".env"),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -156,7 +160,7 @@ class Settings(BaseSettings):
     @field_validator("llm_provider")
     @classmethod
     def validate_llm_provider(cls, v: str) -> str:
-        allowed = {"openai_compatible", "anthropic", "fake"}
+        allowed = {"openai_compatible", "anthropic", "gemini", "fake"}
         if v not in allowed:
             raise ValueError(f"LLM_PROVIDER must be one of {allowed}, got '{v}'")
         return v

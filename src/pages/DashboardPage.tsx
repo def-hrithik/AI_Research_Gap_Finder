@@ -9,10 +9,13 @@ import { LoadingState } from '../components/common/LoadingState';
 import { ErrorState } from '../components/common/ErrorState';
 
 export const DashboardPage: React.FC = () => {
-  const { data: projects, isLoading, isError, refetch } = useProjects();
+  const { data: projects, isLoading, isError, error, refetch } = useProjects();
 
   if (isLoading) return <LoadingState message="Loading your workspace..." className="mt-20" />;
-  if (isError) return <ErrorState onRetry={refetch} className="mt-20" />;
+  if (isError) {
+    const errorMsg = error instanceof Error ? error.message : 'Unable to load workspace. Please ensure the backend server is running.';
+    return <ErrorState message={errorMsg} onRetry={refetch} className="mt-20" />;
+  }
 
   const projectsCount = projects?.length || 0;
   const papersCount = projects?.reduce((acc, p) => acc + p.paperCount, 0) || 0;

@@ -7,7 +7,7 @@ import { Badge } from '../common/Badge';
 export const EvidenceList: React.FC<{ evidence: Evidence[] }> = ({ evidence }) => {
   return (
     <div className="space-y-4">
-      {evidence.map((ev, idx) => (
+      {(evidence || []).map((ev, idx) => (
         <Card key={idx} className="p-5 border-border bg-background">
           <div className="flex justify-between items-start mb-3">
             <div className="flex items-center gap-2">

@@ -31,6 +31,7 @@ def init_db(database_url: str, data_dir: str = "./data") -> None:
     if database_url.startswith("sqlite"):
         # SQLite needs check_same_thread=False for FastAPI (08 §11)
         connect_args["check_same_thread"] = False
+        connect_args["timeout"] = 30.0
 
         # Ensure the SQLite file directory exists
         db_path = database_url.replace("sqlite:///", "")

@@ -8,6 +8,8 @@
 [![Database](https://img.shields.io/badge/Database-SQLAlchemy%202.0%20%7C%20SQLite%2FPostgres-336791?style=flat-square&logo=postgresql&logoColor=white)](https://www.sqlalchemy.org/)
 [![Qdrant](https://img.shields.io/badge/Vector%20Store-Qdrant%20v1.14.2-DC2626?style=flat-square&logo=qdrant&logoColor=white)](https://qdrant.tech/)
 [![Docker](https://img.shields.io/badge/Deployment-Docker%20%7C%20Compose-2496ED?style=flat-square&logo=docker&logoColor=white)](https://www.docker.com/)
+[![Tests](https://img.shields.io/badge/Tests-26%20Passed%20(100%25)-brightgreen?style=flat-square&logo=pytest&logoColor=white)](https://pytest.org/)
+[![Inference](https://img.shields.io/badge/Inference-Gemini%202.5%2F1.5%20%7C%20OpenAI--Compatible-9333EA?style=flat-square)](https://ai.google.dev/)
 
 [← Back to README](./README.md) • [RAG Model Specification](./RAGMODEL.md) • [Backend Implementation](./BACKEND.md)
 
@@ -50,8 +52,8 @@ Nexus AI is engineered as an enterprise-grade, evidence-grounded scientific inte
 graph TD
     subgraph ClientTier ["1. Client Tier (Browser)"]
         SPA["React 19 Single Page Application"]
-        QueryCache["TanStack Query Cache Layer"]
-        HttpService["Axios API Client (realApi.ts)"]
+        QueryCache["TanStack Query Cache Layer (Retry Policy: 1s Delay)"]
+        HttpService["Axios Client (15s Bounded Timeout & Network Interceptor)"]
         SPA --> QueryCache --> HttpService
     end
 
@@ -61,7 +63,7 @@ graph TD
     end
 
     subgraph ServiceTier ["3. Application Service Tier (FastAPI)"]
-        Controllers["FastAPI Route Controllers"]
+        Controllers["FastAPI Route Controllers (Threadpool Offloading for SQLite)"]
         Middleware["CORS, Telemetry & Request-ID Middleware"]
         JobManager["In-Process Asyncio Job Runner"]
         
@@ -82,7 +84,7 @@ graph TD
     end
 
     subgraph PersistenceTier ["5. Persistence & Retrieval Tier"]
-        RDBMS[("SQLAlchemy 2.0 (SQLite WAL / PostgreSQL)")]
+        RDBMS[("SQLAlchemy 2.0 (SQLite WAL & 30s Busy Timeout / PostgreSQL)")]
         VectorDB[("Qdrant Vector DB (Cosine Distance)")]
         BlobStore[("Filesystem / Storage (PDF Binaries)")]
 
@@ -97,7 +99,7 @@ graph TD
     subgraph InferenceTier ["6. AI & Inference Tier"]
         BGE_Embed["BAAI/bge-m3 Dense Embeddings"]
         BGE_Rerank["BAAI/bge-reranker-v2-m3 Cross-Encoder"]
-        LLM["OpenAI-Compatible LLM Inference"]
+        LLM["Google GenAI (Gemini 2.5 Flash/Lite Fallback) & OpenAI"]
 
         Ingestion --> BGE_Embed
         Search --> BGE_Rerank
@@ -185,7 +187,15 @@ src/
 └── utils/              # Formatting and styling utilities
 ```
 
-- **State Management**: `@tanstack/react-query` v5 provides asynchronous state management, request deduplication, and automatic query cache invalidation upon background job completion.
+- **State Management & Network Resilience**:
+  - `@tanstack/react-query` v5 provides asynchronous state management, request deduplication, and automatic query cache invalidation upon background job completion.
+  - Configured with bounded retries (`retry: 1`, `retryDelay: 1000`) to prevent infinite loading cascades.
+  - Centralized Axios client (`realApi.ts`) enforces a **15-second bounded timeout** (`timeout: 15000`) and registers a global response interceptor converting network dropouts (`ERR_NETWORK`) and timeouts (`ECONNABORTED`) into clear, actionable error messages.
+  - **Deterministic UI State Transitions**: All views (`DashboardPage`, `ProjectsPage`, `PapersPage`) strictly enforce four distinct states:
+    - `LoadingState`: Active request in flight with animated feedback.
+    - `ErrorState`: Displayed when an API request fails or times out, accompanied by an actionable error description and a working `onRetry` button.
+    - `EmptyState`: Rendered when an API request succeeds with zero items, providing immediate calls-to-action (e.g. "Create Project").
+    - `SuccessState`: Renders domain components once real, non-mock data is hydrated.
 - **Styling Architecture**: Vanilla Tailwind CSS v3 configured with CSS variable tokens (`--background`, `--surface`, `--accent`, `--border`), enabling instantaneous dark/light mode switching via the `[data-theme='dark']` DOM attribute.
 
 ---
@@ -298,14 +308,20 @@ erDiagram
 
 ## 8. AI & Inference Integration
 
-Nexus AI integrates specialized neural models for each stage of the comprehension pipeline:
+Nexus AI integrates specialized neural models and generative engines for each stage of the comprehension pipeline:
 
 | Pipeline Stage | Model Identifier | Architecture | Hardware Spec |
 | :--- | :--- | :--- | :--- |
 | **Dense Embeddings** | `BAAI/bge-m3` | 1024-dim Dense Transformer | CPU / CUDA (`torch`) |
 | **Cross-Encoder Reranker** | `BAAI/bge-reranker-v2-m3` | Cross-Attention Transformer | CPU / CUDA (`sentence-transformers`) |
-| **Generative Synthesis** | OpenAI / Gemini / Ollama | Transformer LLM | Hosted API / Self-Hosted |
-| **Offline Stub** | `FakeLLMClient` | Deterministic Mock Provider | Zero Compute (Local Testing) |
+| **Generative Synthesis (Primary)** | Google Gemini 2.5/1.5 (`google-genai`) | Gemini Flash with Lite Fallback | Hosted API (`gemini-2.5-flash-lite`) |
+| **Generative Synthesis (Alternative)** | OpenAI / Ollama / vLLM | Transformer LLM (`gpt-4o-mini`) | Hosted API / Self-Hosted |
+| **Offline Testing Stub** | `FakeLLMClient` | Deterministic Mock Provider | Zero Compute (Local Unit Tests) |
+
+### Inference Engine Architecture
+* **Google GenAI Native Provider**: Direct integration using the official `google-genai` SDK (`app/llm/providers/gemini.py`). Supports native schema enforcement and AFC (Automatic Function Calling).
+* **Automatic Capacity Spike Failover**: If Gemini returns an HTTP 503 (`UNAVAILABLE` demand spike), the provider automatically catches the transient error and fails over seamlessly to `gemini-2.5-flash-lite` without aborting the background synthesis job.
+* **Structured Output Guarantees**: Generation strictly adheres to typed Pydantic models in `app/schemas/analysis_llm.py` (`SinglePaperAnalysisLLM`, `ResearchGapsLLMOutput`, `ContradictionsLLMOutput`). All synthesized hypotheses are mapped into deterministic relational entities.
 
 ---
 
@@ -347,7 +363,7 @@ sequenceDiagram
 
 ## 10. Containerized Deployment Architecture
 
-The complete system deploys via [docker-compose.yml](file:///c:/Users/admin/Desktop/major%20project/ai-research-gap/docker-compose.yml):
+The complete system deploys via [docker-compose.yml](file:///c:/Users/admin/Desktop/major%20project/ai-research-gap/docker-compose.yml) with automated service healthchecks and ordered readiness:
 
 ```mermaid
 graph TD
@@ -359,8 +375,8 @@ graph TD
 
     subgraph DockerNetwork ["Internal Docker Bridge Network (rgf-network)"]
         FrontendContainer["rgf-frontend (Nginx Alpine)"]
-        BackendContainer["rgf-backend (Python 3.11 FastAPI)"]
-        QdrantContainer["rgf-qdrant (Qdrant v1.14.2)"]
+        BackendContainer["rgf-backend (Python 3.11 FastAPI - Healthchecked)"]
+        QdrantContainer["rgf-qdrant (Qdrant v1.14.2 - Healthchecked)"]
     end
 
     subgraph Volumes ["Persistent Storage Volumes"]
@@ -372,40 +388,52 @@ graph TD
     Port8000 --> BackendContainer
     Port6333 --> QdrantContainer
 
-    FrontendContainer -->|Reverse Proxy /api/| BackendContainer
-    BackendContainer -->|gRPC / HTTP :6333| QdrantContainer
+    FrontendContainer -->|Reverse Proxy /api/ (Waits for Backend Health)| BackendContainer
+    BackendContainer -->|gRPC / HTTP :6333 (Waits for Qdrant Health)| QdrantContainer
 
     BackendContainer --- VolData
     QdrantContainer --- VolQdrant
 ```
 
+- **Healthcheck & Startup Order**:
+  - `rgf-qdrant`: TCP socket poll on port 6333 (`interval: 10s`, `retries: 5`).
+  - `rgf-backend`: HTTP probe querying `/api/health` via Python (`interval: 10s`, `start_period: 15s`).
+  - `rgf-frontend`: Configured with `depends_on: backend: condition: service_healthy`, preventing reverse proxy 502 Bad Gateway responses during initial database migrations.
+
 ---
 
 ## 11. Configuration & Startup Lifecycle
 
-Implemented in [app/main.py](file:///c:/Users/admin/Desktop/major%20project/ai-research-gap/backend/app/main.py) and [app/config.py](file:///c:/Users/admin/Desktop/major%20project/ai-research-gap/backend/app/config.py):
+Implemented in [app/main.py](file:///c:/Users/admin/Desktop/major%20project/ai-research-gap/backend/app/main.py), [app/config.py](file:///c:/Users/admin/Desktop/major%20project/ai-research-gap/backend/app/config.py), and `dev.ps1`:
 
 ```
+Local Development Pre-Flight (dev.ps1):
+1. Locate backend/.env (auto-resolves from workspace root or backend dir)
+2. Detect and terminate orphaned/zombie processes bound to port 8000
+3. Validate virtual environment and display dual-terminal launch parameters
+
 FastAPI Lifespan Startup:
-1. Validate settings (Fail-Fast Rule)
-2. Setup structured logging
-3. Ensure runtime directories (data/, data/uploads/, data/qdrant/)
-4. Initialize SQLAlchemy database schema (create tables if missing)
+1. Validate settings (Fail-Fast Rule via Pydantic-settings)
+2. Setup structured logging with contextual X-Request-ID
+3. Ensure runtime data directories (data/, data/uploads/, data/qdrant/)
+4. Initialize SQLAlchemy database schema (creates tables with WAL & busy timeout)
 5. Initialize in-process async Job Runner (concurrency cap: 2)
 6. Startup sweep: Mark previously interrupted jobs as FAILED
 7. Ready to serve requests
 ```
 
 > [!NOTE]
-> **Startup Sweep**: If the server process crashes while a long-running PDF ingestion job is in `RUNNING` status, the startup sweep detects unfinalized jobs and transitions them to `FAILED` with an actionable error code, preventing permanent UI loading spinners.
+> **Startup Sweep**: If the server process restarts while a long-running PDF ingestion job is in `RUNNING` status, the startup sweep detects unfinalized jobs and transitions them to `FAILED` with an actionable error code (`INTERRUPTED`), preventing permanent UI loading spinners.
 
 ---
 
 ## 12. Scalability, Concurrency & Fault Tolerance
 
+* **Non-Blocking Threadpool Dispatch**: Synchronous SQLite database queries (in `app/api/projects.py`) are implemented as standard `def` functions, allowing FastAPI to execute them in external thread pools via `run_in_threadpool`. This prevents synchronous database reads/writes from freezing the single-threaded asyncio event loop.
+* **Database WAL Mode & Busy Timeout**: SQLite runs in Write-Ahead Logging (`PRAGMA journal_mode=WAL`) with a `30.0s` connection busy timeout (`connect_args["timeout"] = 30.0`), preventing `OperationalError: database is locked` during concurrent background job commits and frontend polling.
+* **Bounded Frontend Networking**: Axios client enforces a 15-second timeout with failure interceptors, guaranteeing that frontend components immediately transition from `LoadingState` to `ErrorState` with retry capabilities rather than remaining stuck in an infinite spinner.
 * **Asynchronous Concurrency**: Ingestion and synthesis jobs are limited by an internal semaphore (`ANALYSIS_MAX_CONCURRENCY=2`) to prevent CPU exhaustion during batch PDF processing.
-* **Database WAL Mode**: SQLite runs in Write-Ahead Logging (`PRAGMA journal_mode=WAL`), allowing concurrent readers without blocking writes.
-* **LLM Throttling Protection**: External inference requests are throttled using an `asyncio.Semaphore` (`LLM_MAX_CONCURRENCY=4`) and retried using exponential backoff with jitter via `tenacity`.
+* **LLM Throttling & Failover**: External inference requests are throttled using an `asyncio.Semaphore` (`LLM_MAX_CONCURRENCY=4`), retried with exponential backoff via `tenacity`, and automatically failed over to lighter models (`gemini-2.5-flash-lite`) if transient 503 capacity spikes occur.
 * **Scale-Out Strategy**: For horizontal multi-instance scaling, SQLite can be replaced with managed PostgreSQL, and the in-process job runner can be swapped for Celery workers consuming from Redis.
 
 ---

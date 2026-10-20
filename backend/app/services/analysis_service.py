@@ -21,6 +21,28 @@ from app.schemas.llm_out import PaperAnalysisOut
 
 logger = logging.getLogger("rgf.services.analysis")
 
+# ----- LLM System Prompt for Paper Analysis -----
+PAPER_ANALYSIS_SYSTEM_PROMPT = """You are an expert academic paper analyst. Given the text of a research paper (provided as a series of chunks), produce a structured JSON analysis.
+
+You MUST output valid JSON with exactly this structure:
+{
+  "problem": "A concise description of the research problem (1-3 sentences)",
+  "methodology": "Description of the methodology and approach used (1-3 sentences)",
+  "models": ["List of models, algorithms, or architectures used"],
+  "dataset": ["List of datasets, benchmarks, or data sources used"],
+  "findings": "Key findings and results (1-3 sentences)",
+  "limitations": ["List of stated or inferred limitations (each a concise sentence)"],
+  "futureWork": ["List of future work directions mentioned or implied (each a concise sentence)"]
+}
+
+Rules:
+- Extract information ONLY from the provided text. Do not hallucinate.
+- If a field cannot be determined from the text, use a brief generic placeholder.
+- Keep "models" and "dataset" as short keyword lists (max 6 items each).
+- Keep "limitations" and "futureWork" lists to max 5 items each.
+- Be precise and academic in tone.
+"""
+
 
 def extract_paper_analysis_heuristically(paper: Paper, chunks: list[Chunk]) -> dict[str, Any]:
     """Extract structured paper analysis directly from chunk text and metadata.
@@ -141,6 +163,54 @@ def extract_paper_analysis_heuristically(paper: Paper, chunks: list[Chunk]) -> d
     }
 
 
+async def analyze_paper_with_llm(paper: Paper, chunks: list[Chunk]) -> dict[str, Any] | None:
+    """Use real LLM to extract structured analysis from paper chunks.
+    
+    Returns None if LLM is not configured or call fails (will fallback to heuristic).
+    """
+    settings = get_settings()
+    if settings.llm_provider == "fake" or not settings.llm_api_key:
+        return None
+
+    # Build paper text from chunks (limit to ~6000 tokens worth)
+    chunk_texts = []
+    total_chars = 0
+    max_chars = 24000  # ~6000 tokens
+
+    for chunk in sorted(chunks, key=lambda c: (c.page, c.chunk_index)):
+        text = chunk.text.strip()
+        if not text:
+            continue
+        section = chunk.section_heading or chunk.chunk_type or "Body"
+        entry = f"[{section} | Page {chunk.page}]\n{text}"
+        if total_chars + len(entry) > max_chars:
+            break
+        chunk_texts.append(entry)
+        total_chars += len(entry)
+
+    if not chunk_texts:
+        return None
+
+    user_prompt = f"Paper Title: {paper.title}\n\nPaper Text Chunks:\n\n" + "\n\n---\n\n".join(chunk_texts)
+
+    try:
+        llm = get_llm_client()
+        from app.schemas.analysis_llm import PaperAnalysisLLMOut
+        parsed, result = await llm.complete_json(
+            system_prompt=PAPER_ANALYSIS_SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            schema=PaperAnalysisLLMOut,
+            temperature=0.0,
+            max_tokens=2500,
+        )
+        logger.info("LLM analysis completed for paper %s (model=%s, latency=%dms)", 
+                     paper.paper_id, result.model, result.latency_ms)
+        return parsed.model_dump()
+    except Exception as exc:
+        logger.warning("LLM analysis failed for paper %s, falling back to heuristic: %s", paper.paper_id, exc)
+        return None
+
+
 async def analyze_paper(paper_id: str, db: Session, force_refresh: bool = False) -> dict[str, Any]:
     """Run structured analysis for a paper, storing results in database."""
     paper = repos.get_paper(db, paper_id)
@@ -154,8 +224,12 @@ async def analyze_paper(paper_id: str, db: Session, force_refresh: bool = False)
 
     chunks = repos.list_chunks_by_paper(db, paper_id)
 
-    # Extract analysis
-    payload = extract_paper_analysis_heuristically(paper, chunks)
+    settings = get_settings()
+    payload = await analyze_paper_with_llm(paper, chunks)
+    llm_model = settings.llm_model if payload is not None else "heuristic-extractor"
+
+    if payload is None:
+        payload = extract_paper_analysis_heuristically(paper, chunks)
 
     # Save to database
     analysis_id = new_id("ana")
@@ -164,7 +238,7 @@ async def analyze_paper(paper_id: str, db: Session, force_refresh: bool = False)
         analysis_id=analysis_id,
         paper_id=paper_id,
         prompt_version="1.0.0",
-        llm_model="heuristic-extractor",
+        llm_model=llm_model,
         payload=payload,
         status="COMPLETED",
     )
@@ -172,5 +246,5 @@ async def analyze_paper(paper_id: str, db: Session, force_refresh: bool = False)
     # Update paper status to ANALYZED
     repos.update_paper_status(db, paper_id, status="ANALYZED")
 
-    logger.info("Paper %s analyzed successfully (analysis_id=%s)", paper_id, analysis_id)
+    logger.info("Paper %s analyzed successfully (analysis_id=%s, model=%s)", paper_id, analysis_id, llm_model)
     return payload

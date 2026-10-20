@@ -10,11 +10,14 @@ import { ErrorState } from '../components/common/ErrorState';
 import { EmptyState } from '../components/common/EmptyState';
 
 export const ProjectsPage: React.FC = () => {
-  const { data: projects, isLoading, isError, refetch } = useProjects();
+  const { data: projects, isLoading, isError, error, refetch } = useProjects();
   const [isCreateOpen, setIsCreateOpen] = useState(false);
 
   if (isLoading) return <LoadingState message="Loading projects..." className="mt-20" />;
-  if (isError) return <ErrorState onRetry={refetch} className="mt-20" />;
+  if (isError) {
+    const errorMsg = error instanceof Error ? error.message : 'Unable to connect to backend server. Please verify the service is running.';
+    return <ErrorState message={errorMsg} onRetry={refetch} className="mt-20" />;
+  }
 
   return (
     <div className="max-w-7xl mx-auto space-y-8">

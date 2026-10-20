@@ -25,6 +25,9 @@ rank-bm25==0.2.2
 # HTTP client (LLM calls)
 httpx==0.28.1
 
+# Google Gemini AI
+google-genai>=1.0.0
+
 # Rate limiting
 slowapi==0.1.9
 

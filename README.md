@@ -9,8 +9,9 @@
 [![BGE-M3](https://img.shields.io/badge/Embeddings-BAAI%2Fbge--m3%20(1024d)-4F46E5?style=flat-square)](https://huggingface.co/BAAI/bge-m3)
 [![Reranker](https://img.shields.io/badge/Reranker-bge--reranker--v2--m3-059669?style=flat-square)](https://huggingface.co/BAAI/bge-reranker-v2-m3)
 [![Tailwind CSS](https://img.shields.io/badge/Styling-Tailwind%20CSS%20v3-38B2AC?style=flat-square&logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
-[![Docker](https://img.shields.io/badge/Deployment-Docker%20%7C%20Compose-2496ED?style=flat-square&logo=docker&logoColor=white)](https://www.docker.com/)
-[![Tests](https://img.shields.io/badge/Tests-21%20Passed%20(100%25)-brightgreen?style=flat-square&logo=pytest&logoColor=white)](https://pytest.org/)
+[![Tests](https://img.shields.io/badge/Tests-26%20Passed%20(100%25)-brightgreen?style=flat-square&logo=pytest&logoColor=white)](https://pytest.org/)
+[![Frontend Tests](https://img.shields.io/badge/Frontend%20Tests-4%20Passed-blue?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org/)
+[![LLM Engine](https://img.shields.io/badge/Inference-Gemini%202.5%2F1.5%20%7C%20OpenAI--Compatible-9333EA?style=flat-square)](https://ai.google.dev/)
 
 <p align="center">
   <b>Transform unstructured academic PDF libraries into structured research intelligence.</b><br/>
@@ -95,8 +96,11 @@ Literature reviews in scientific disciplines require manual tabulation of method
 * **Two-Column Academic Ingestion**: PyMuPDF extraction engine with layout heuristics, reading-order resolution, and typographic font analysis.
 * **Hybrid RAG (Dense + Lexical)**: Dual-stream retrieval fusing 1024-dimensional dense vectors (`BAAI/bge-m3`) with BM25 lexical token matching via Reciprocal Rank Fusion ($k=60$).
 * **Cross-Encoder Reranking**: Re-scores top candidates using `BAAI/bge-reranker-v2-m3` blended with structural section priors.
-* **Automated Contradiction Surfacing**: Identifies opposing experimental outcomes or conflicting claims between paper pairs.
+* **Multi-Provider LLM Inference Engine**: Native Google GenAI SDK integration (`google-genai` with Gemini 2.5/1.5 Flash & automatic fallback to Flash-Lite upon 503 capacity spikes) alongside OpenAI-compatible endpoints (`gpt-4o-mini`, vLLM, Ollama).
+* **Strict Schema Enforcement**: Pydantic v2 structured contracts (`app/schemas/analysis_llm.py`) enforcing deterministic schema outputs for paper analysis, research gap synthesis, and contradiction detection.
+* **Automated Contradiction Surfacing**: Identifies opposing experimental outcomes or conflicting claims between paper pairs with grounded evidence snippets.
 * **Interactive Landscape Exploration**: Dynamic scatter plots and frequency distributions for topic clusters, shared datasets, and recurring limitations.
+* **Production Network Resilience**: Frontend Axios client with 15-second bounded timeouts, connection failure interceptors, non-blocking FastAPI threadpool dispatching for synchronous SQLite operations, and graceful retry recovery.
 * **Asynchronous Pipeline Execution**: Ingestion, embedding generation, and cross-paper synthesis run as background tasks polled via structured status endpoints.
 
 ---
@@ -487,15 +491,18 @@ DevOps:    Docker • Docker Compose • Nginx • Pytest • Oxlint
 | **Frontend Framework** | React | `^19.2.8` | Component-based reactive user interface. |
 | **Language (Web)** | TypeScript | `~6.0.2` | End-to-end static type safety. |
 | **Styling** | Tailwind CSS | `^3.4.19` | Design token system with instant dark mode switching. |
-| **Data Fetching** | TanStack Query | `^5.102.8` | Client-side query caching and job polling invalidation. |
+| **HTTP & Networking** | Axios | `^1.20.0` | HTTP client with 15s bounded timeout & failure interceptors. |
+| **Data Fetching** | TanStack Query | `^5.102.8` | Client-side query caching, retry policy, and job polling. |
 | **Visualizations** | Recharts | `^3.10.1` | Scatter cluster plots and methodology frequency charts. |
-| **Backend Framework** | FastAPI | `0.115.12` | High-performance asynchronous REST API framework. |
+| **Backend Framework** | FastAPI | `0.115.12` | High-performance asynchronous & threaded REST API framework. |
 | **Language (API)** | Python | `3.11+` | Core scientific and web service runtime. |
-| **ORM** | SQLAlchemy | `2.0.41` | Relational database abstraction and transactions. |
+| **ORM** | SQLAlchemy | `2.0.41` | Relational database abstraction and WAL transactions. |
 | **Vector Store** | Qdrant Client | `1.14.2` | Vector index supporting payload-filtered cosine search. |
 | **PDF Extraction** | PyMuPDF (`fitz`) | `1.25.5` | Layout-aware text and boundary box extraction. |
 | **Embeddings** | `sentence-transformers` | `4.1.0` | Dense vector generation (`BAAI/bge-m3`). |
 | **Lexical Search** | `rank-bm25` | `0.2.2` | Okapi BM25 index for keyword retrieval. |
+| **Generative LLM Engine**| `google-genai` & `openai` | Latest | Multi-provider inference (Gemini 2.5 Flash/Lite & OpenAI API). |
+| **Testing** | Pytest & Node Test Runner | Latest | Automated backend (26 tests) and frontend (4 tests) suites. |
 
 ---
 
@@ -539,7 +546,7 @@ npm install
 
 ## 15. Configuration & Environment Variables
 
-All backend configuration is managed through Pydantic-settings in [app/config.py](file:///c:/Users/admin/Desktop/major%20project/ai-research-gap/backend/app/config.py). Configure `backend/.env`:
+All backend configuration is managed through Pydantic-settings in [app/config.py](file:///c:/Users/admin/Desktop/major%20project/ai-research-gap/backend/app/config.py). Configure `backend/.env` (automatically discovered from root or backend directory):
 
 ```ini
 # --- Application ---
@@ -556,11 +563,11 @@ MAX_UPLOAD_MB=25
 MAX_PDF_PAGES=80
 MAX_PAPERS_PER_PROJECT=30
 
-# --- LLM Inference ---
-LLM_PROVIDER=openai_compatible
+# --- LLM Inference (Gemini or OpenAI-Compatible) ---
+LLM_PROVIDER=gemini                  # gemini | openai_compatible | anthropic | fake
 LLM_API_KEY=your-api-key-here
-LLM_MODEL=gpt-4o-mini
-LLM_BASE_URL=https://api.openai.com/v1
+LLM_MODEL=gemini-2.5-flash-lite      # e.g., gemini-2.5-flash, gemini-2.5-flash-lite, gpt-4o-mini
+LLM_BASE_URL=                        # (Optional for openai_compatible: https://api.openai.com/v1)
 
 # --- Embeddings & Reranker ---
 EMBEDDING_MODEL=BAAI/bge-m3
@@ -577,7 +584,16 @@ QDRANT_COLLECTION=rgf_chunks
 
 ## 16. Running the System
 
-### Standard Dual-Terminal Execution
+### Option A: Windows PowerShell Assistant (Recommended for Windows)
+
+Use the built-in development assistant script to check prerequisites, clear any lingering zombie processes on port 8000, and ensure clean socket binding:
+
+```powershell
+# Pre-flight check & zombie process termination:
+powershell -ExecutionPolicy Bypass -File dev.ps1 -CheckOnly
+```
+
+### Option B: Standard Dual-Terminal Execution
 
 #### Terminal 1: Start Backend API
 ```bash
@@ -586,7 +602,7 @@ cd backend
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 > [!NOTE]
-> The database automatically creates tables in `./data/rgf.db` on startup.  
+> The database automatically creates tables in `./data/rgf.db` with WAL mode and busy timeouts on startup.  
 > Interactive OpenAPI documentation is accessible at `http://127.0.0.1:8000/docs`.
 
 #### Terminal 2: Start Frontend Development Server
@@ -594,59 +610,73 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 # In the root repository directory:
 npm run dev
 ```
-Open **`http://localhost:5173`** in your browser. The Vite dev proxy forwards all `/api/*` calls to the FastAPI backend.
+Open **`http://localhost:5173`** in your browser. The Vite dev proxy forwards all `/api/*` calls to the FastAPI backend at `http://127.0.0.1:8000`.
 
 ---
 
 ## 17. Verification & Testing
 
-### 1. Backend Unit Tests
-Runs the test suite for ID generation, text normalization, section detectors, and synthetic PDF parsing:
+### 1. Backend Unit & API Tests
+Runs the complete test suite covering API endpoints (`/api/health`, `/api/projects` CRUD, empty database envelopes, 404 validation), ID generation, Unicode NFKC text normalization, and PyMuPDF layout parsing:
 ```bash
 cd backend
 pytest -v tests/unit
 ```
 ```text
-tests/unit/core/test_core.py::TestIds::test_new_id_has_prefix PASSED
-tests/unit/core/test_core.py::TestTextNormalize::test_quote_in_chunk_basic PASSED
-tests/unit/ingestion/test_ingestion.py::test_pdf_parsing_end_to_end PASSED
-============================= 21 passed in 2.16s ==============================
+tests/unit/api/test_projects_and_health.py::test_health_endpoint PASSED  [  3%]
+tests/unit/api/test_projects_and_health.py::test_projects_empty_database PASSED [  7%]
+tests/unit/api/test_projects_and_health.py::test_create_and_retrieve_project PASSED [ 11%]
+tests/unit/api/test_projects_and_health.py::test_get_nonexistent_project_returns_404 PASSED [ 15%]
+tests/unit/api/test_projects_and_health.py::test_project_delete PASSED   [ 19%]
+tests/unit/core/test_core.py (16 tests) PASSED                           [ 80%]
+tests/unit/ingestion/test_ingestion.py (5 tests) PASSED                  [100%]
+======================= 26 passed, 1 warning in 13.14s ========================
 ```
 
-### 2. End-to-End Pipeline Integration Test
-Executes a test creating a project, generating a synthetic PDF in memory, uploading, ingesting, polling jobs, running semantic searches, extracting research gaps, synthesizing landscape data, and generating a literature report:
+### 2. Frontend Resilience & API Client Tests
+Verifies that Axios bounded timeouts (15s), network error interceptors, and response mapping execute deterministically without freezing the UI:
 ```bash
-cd backend
-python tests/test_e2e_pipeline.py
+npm test
 ```
 ```text
->>> ALL 11 END-TO-END RAG & PLATFORM TESTS PASSED SUCCESSFULLY! <<<
+> node --test tests/frontend-api.test.mjs
+✔ apiClient configuration has bounded timeout (3.6ms)
+✔ apiClient interceptor converts ECONNABORTED timeout to actionable error (6.6ms)
+✔ apiClient interceptor converts connection refused to actionable backend error (1.0ms)
+✔ Project response transformation handles empty and populated data correctly (0.5ms)
+ℹ tests 4, pass 4, fail 0
 ```
 
-### 3. Frontend Production Build & Type Checking
+### 3. Frontend Production Build & Linting
 ```bash
+npm run lint
 npm run build
 ```
 ```text
-✓ built in 7.57s
-dist/index.html                   1.25 kB
-dist/assets/index-*.css          30.53 kB
-dist/assets/index-*.js          988.82 kB
+> oxlint
+Found 0 errors.
+
+> tsc -b && vite build
+✓ 3013 modules transformed.
+dist/index.html                   1.25 kB │ gzip:   0.63 kB
+dist/assets/index-*.css          30.53 kB │ gzip:   6.24 kB
+dist/assets/index-*.js          992.18 kB │ gzip: 295.78 kB
+✓ built in 11.43s
 ```
 
 ---
 
 ## 18. Docker & Containerized Deployment
 
-Deploy the entire stack (Qdrant + FastAPI + Nginx Frontend) with a single command:
+Deploy the entire production stack (Qdrant + FastAPI with Healthcheck + Nginx Frontend) with dependency readiness guarantees:
 
 ```bash
 docker compose up --build -d
 ```
 
-```
-Container rgf-qdrant    Started (Port 6333)
-Container rgf-backend   Started (Port 8000)
+```text
+Container rgf-qdrant    Healthy (Port 6333)
+Container rgf-backend   Healthy (Port 8000)
 Container rgf-frontend  Started (Port 3000)
 ```
 

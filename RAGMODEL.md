@@ -8,6 +8,7 @@
 [![Qdrant](https://img.shields.io/badge/Vector%20Store-Qdrant%20v1.14.2-DC2626?style=flat-square&logo=qdrant&logoColor=white)](https://qdrant.tech/)
 [![BM25](https://img.shields.io/badge/Lexical%20Index-Okapi%20BM25-F59E0B?style=flat-square)](https://github.com/dorianbrown/rank_bm25)
 [![Quote Verification](https://img.shields.io/badge/Verification-NFKC%20Ligature%20Fold-10B981?style=flat-square)](#9-provenance--deterministic-quote-verification)
+[![LLM Engine](https://img.shields.io/badge/LLM-Google%20GenAI%20(Gemini)%20%7C%20OpenAI-9333EA?style=flat-square)](https://ai.google.dev/)
 
 [← Back to README](./README.md) • [System Architecture](./SYSTEMARCHITECTURE.md) • [Backend Implementation](./BACKEND.md)
 
@@ -255,18 +256,24 @@ graph LR
 
 ## 10. LLM Synthesis & Structured Output Generation
 
-Implemented in [app/llm/client.py](file:///c:/Users/admin/Desktop/major%20project/ai-research-gap/backend/app/llm/client.py) and [app/schemas/llm_out.py](file:///c:/Users/admin/Desktop/major%20project/ai-research-gap/backend/app/schemas/llm_out.py):
+Implemented in [app/llm/client.py](file:///c:/Users/admin/Desktop/major%20project/ai-research-gap/backend/app/llm/client.py), [app/llm/providers/gemini.py](file:///c:/Users/admin/Desktop/major%20project/ai-research-gap/backend/app/llm/providers/gemini.py), and [app/schemas/analysis_llm.py](file:///c:/Users/admin/Desktop/major%20project/ai-research-gap/backend/app/schemas/analysis_llm.py):
 
-- **Abstract Provider Interface**: Decouples business logic from model vendors. Supports `openai_compatible` (OpenAI, Gemini, vLLM, Ollama), `anthropic`, and offline `fake` mock providers.
-- **Pydantic Validation**: Outputs are parsed against strict Pydantic v2 schemas with field length limits and enum enforcement (`GapCategory`, `EvidenceStrength`).
+- **Multi-Vendor Provider Architecture**:
+  - **Google GenAI Native Provider (`gemini`)**: Integrated via official Google GenAI SDK (`google-genai`). Supports high-throughput free-tier and paid models (`gemini-2.5-flash`, `gemini-2.5-flash-lite`, `gemini-1.5-pro`).
+  - **Dynamic Capacity Fallback**: Automatically catches HTTP 503 (`UNAVAILABLE` / high demand spike) errors and seamlessly falls back to `gemini-2.5-flash-lite`, ensuring uninterrupted RAG analysis pipelines during API load spikes.
+  - **OpenAI-Compatible Provider (`openai_compatible`)**: Supports OpenAI (`gpt-4o-mini`), local Ollama instances, and self-hosted vLLM inference engines.
+  - **Offline Mock Provider (`fake`)**: Deterministic outputs for unit testing and CI test environments.
+- **Strict Pydantic v2 Schema Enforcement**:
+  - LLM outputs are directly validated against structured models: `SinglePaperAnalysisLLM`, `ResearchGapsLLMOutput`, and `ContradictionsLLMOutput`.
+  - Ensures all generated methodology cards, experimental limitations, and gap hypotheses strictly adhere to typed JSON contracts with bounded field lengths.
 - **Fault-Tolerant Retries**: Network timeouts and schema parsing errors trigger exponential backoff retries via `tenacity`.
 - **Concurrency Limiting**: Uses an internal `asyncio.Semaphore` (`LLM_MAX_CONCURRENCY=4`) to prevent rate-limit throttling.
 
 <details>
-<summary><b>🔍 View Research Gap Output Schema (llm_out.py)</b></summary>
+<summary><b>🔍 View Research Gap Output Schema (analysis_llm.py)</b></summary>
 
 ```python
-class ResearchGapLLM(BaseModel):
+class ResearchGapLLMItem(BaseModel):
     category: Literal[
         "METHODOLOGICAL", "EMPIRICAL", "THEORETICAL", 
         "DATASET", "METRIC", "GENERALIZATION"
@@ -276,7 +283,12 @@ class ResearchGapLLM(BaseModel):
     description: str = Field(..., max_length=1000)
     suggested_question: str = Field(..., max_length=300)
     suggested_methodology: str = Field(..., max_length=500)
-    evidence: list[EvidenceItemLLM]
+    confidence: float = Field(0.8, ge=0.0, le=1.0)
+    supporting_paper_ids: list[str] = Field(default_factory=list)
+    verbatim_evidence: list[str] = Field(default_factory=list)
+
+class ResearchGapsLLMOutput(BaseModel):
+    gaps: list[ResearchGapLLMItem] = Field(default_factory=list)
 ```
 
 </details>

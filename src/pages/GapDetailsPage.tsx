@@ -73,7 +73,7 @@ export const GapDetailsPage: React.FC = () => {
           <Card className="p-6">
             <h3 className="font-bold text-primary mb-4 text-sm uppercase tracking-wider">Supporting Papers</h3>
             <div className="flex flex-wrap gap-2">
-              {gap.supportingPaperIds.map((id) => (
+              {(gap.supportingPaperIds || []).map((id) => (
                 <Badge key={id} variant="default" className="bg-background py-1">Paper ID: {id}</Badge>
               ))}
             </div>

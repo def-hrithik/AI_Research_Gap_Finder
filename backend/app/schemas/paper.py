@@ -43,6 +43,7 @@ class PaperResponse(BaseModel):
     section_detection_quality: str | None = None
     has_analysis: bool = False
     analysis_status: str = "NONE"
+    analysis: dict[str, Any] | None = None
     warnings: list[str] = []
     created_at: datetime
     updated_at: datetime | None = None
@@ -62,7 +63,12 @@ class PaperDetailResponse(BaseModel):
     analysis_status: str = "NONE"
 
 
-def to_paper_response(paper: Any, has_analysis: bool = False, analysis_status: str = "NONE") -> PaperResponse:
+def to_paper_response(
+    paper: Any,
+    has_analysis: bool = False,
+    analysis_status: str = "NONE",
+    analysis: dict[str, Any] | None = None,
+) -> PaperResponse:
     """Map SQLAlchemy Paper model to PaperResponse schema."""
     error = None
     if paper.error_code:
@@ -94,6 +100,7 @@ def to_paper_response(paper: Any, has_analysis: bool = False, analysis_status: s
         section_detection_quality=paper.section_detection_quality,
         has_analysis=has_analysis,
         analysis_status=analysis_status,
+        analysis=analysis,
         warnings=[],
         created_at=paper.created_at,
         updated_at=paper.updated_at,

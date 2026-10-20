@@ -1,8 +1,8 @@
 """
 Research Analysis Service — 04 §1–11, 05 §4, 06 §8–9, 10 Phase 6.
 Synthesizes project-wide research literature:
-- Candidate Research Gaps
-- Contradiction Detection
+- Candidate Research Gaps (LLM-powered when available)
+- Contradiction Detection (LLM-powered when available)
 - Research Landscape (Themes, Methods, Datasets, Limitations)
 - Markdown/Text Report Generation
 """
@@ -12,22 +12,125 @@ from datetime import datetime, timezone
 import logging
 from typing import Any
 
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.core.ids import new_id
 from app.database import repos
 from app.database.models import Contradiction, Paper, ResearchGap, ResearchReport, ResearchRun
+from app.llm.client import get_llm_client
 from app.services.analysis_service import analyze_paper
 
 logger = logging.getLogger("rgf.services.research")
 
 
-def detect_candidate_gaps(papers: list[Paper], chunks_by_paper: dict[str, list[Any]], analyses: dict[str, dict[str, Any]], project_id: str) -> list[dict[str, Any]]:
-    """Synthesize candidate research gaps directly grounded in actual papers and extracted limitations."""
+# ─── LLM Schemas for Research Synthesis ─────────────────────────────────────
+
+class LLMGapEvidence(BaseModel):
+    paperId: str = ""
+    section: str = ""
+    page: int = 1
+    text: str = ""
+    relationshipToGap: str = ""
+    relevanceScore: int = 80
+
+class LLMGapItem(BaseModel):
+    type: str = "Methodological Gap"
+    confidence: int = 80
+    topic: str = ""
+    description: str = ""
+    evidence: list[LLMGapEvidence] = Field(default_factory=list)
+    suggestedQuestion: str = ""
+    suggestedMethodology: str = ""
+
+class LLMGapsOut(BaseModel):
+    gaps: list[LLMGapItem] = Field(default_factory=list)
+
+class LLMContradictionItem(BaseModel):
+    topic: str = ""
+    paperAId: str = ""
+    paperAClaim: str = ""
+    paperBId: str = ""
+    paperBClaim: str = ""
+    experimentalContext: str = ""
+    dataset: str = ""
+    method: str = ""
+    confidenceScore: int = 75
+
+class LLMContradictionsOut(BaseModel):
+    contradictions: list[LLMContradictionItem] = Field(default_factory=list)
+
+
+# ─── LLM System Prompts ─────────────────────────────────────────────────────
+
+GAPS_SYSTEM_PROMPT = """You are an expert research literature analyst. Given structured analyses of multiple academic papers in a project, identify genuine research gaps.
+
+Output valid JSON:
+{
+  "gaps": [
+    {
+      "type": "Repeated Limitation | Methodological Gap | Underexplored Area | Conflicting Evidence",
+      "confidence": 80,
+      "topic": "Short topic title",
+      "description": "2-3 sentence description of the gap grounded in the papers",
+      "evidence": [
+        {
+          "paperId": "paper ID",
+          "section": "section name",
+          "page": 1,
+          "text": "quoted or paraphrased evidence text",
+          "relationshipToGap": "explanation of how this evidence supports the gap",
+          "relevanceScore": 90
+        }
+      ],
+      "suggestedQuestion": "A concrete research question to address this gap",
+      "suggestedMethodology": "Suggested approach to address the gap"
+    }
+  ]
+}
+
+Rules:
+- Identify 2-5 research gaps grounded in the actual paper content.
+- Every gap MUST be supported by evidence from the provided papers.
+- Use actual paper IDs provided in the input.
+- Do NOT invent gaps without textual evidence.
+- Confidence should be 60-95, higher for gaps supported by multiple papers.
+"""
+
+CONTRADICTIONS_SYSTEM_PROMPT = """You are an expert at detecting contradictions, conflicting claims, and methodological trade-offs across academic papers. Given structured analyses of multiple papers in a project, identify points of tension, contrasting claims, or differing empirical results.
+
+Output valid JSON:
+{
+  "contradictions": [
+    {
+      "topic": "What the contradiction or methodological tension is about",
+      "paperAId": "paper ID of first paper",
+      "paperAClaim": "What paper A claims or demonstrates",
+      "paperBId": "paper ID of second paper",
+      "paperBClaim": "What paper B claims or demonstrates (contrasting or diverging from A)",
+      "experimentalContext": "Context of the comparison, benchmarks, or datasets evaluated",
+      "dataset": "Relevant dataset or domain",
+      "method": "Methods being compared or contrasting approaches",
+      "confidenceScore": 75
+    }
+  ]
+}
+
+Rules:
+- Identify 1-4 points of tension, opposing claims, differing methodologies, or contrasting results across the papers.
+- Use actual paper IDs provided in the input for paperAId and paperBId.
+- Focus on methodological trade-offs, diverging performance across benchmarks, or differing conclusions.
+"""
+
+
+# ─── Heuristic Fallbacks ────────────────────────────────────────────────────
+
+def detect_candidate_gaps_heuristic(papers: list[Paper], chunks_by_paper: dict[str, list[Any]], analyses: dict[str, dict[str, Any]], project_id: str) -> list[dict[str, Any]]:
+    """Synthesize candidate research gaps from chunk text and extracted analyses (fallback)."""
     gaps: list[dict[str, Any]] = []
 
-    # Aggregate limitations & future work across papers
-    all_limitations: list[tuple[str, str, int, str]] = []  # (paper_id, paper_title, page, text)
+    all_limitations: list[tuple[str, str, int, str]] = []
     all_future_work: list[tuple[str, str, int, str]] = []
 
     for paper in papers:
@@ -38,33 +141,27 @@ def detect_candidate_gaps(papers: list[Paper], chunks_by_paper: dict[str, list[A
             if c.has_future_cue or c.chunk_type == "FUTURE_WORK":
                 all_future_work.append((paper.paper_id, paper.title, c.page, c.text))
 
-    # Also check structured analysis
     paper_ids = [p.paper_id for p in papers]
 
-    # Pattern 1: Cross-demographic / dataset generalization gap
+    # Pattern 1: Cross-demographic / dataset generalization
     evidence_1 = []
     for p_id, p_title, page, text in all_limitations:
         if any(w in text.lower() for w in ["demographic", "generaliz", "bias", "cohort", "western", "single site", "external"]):
             evidence_1.append({
-                "paperId": p_id,
-                "section": "Limitations",
-                "page": page,
+                "paperId": p_id, "section": "Limitations", "page": page,
                 "text": text[:280] + ("..." if len(text) > 280 else ""),
-                "relationshipToGap": "Directly identifies lack of generalization across diverse external cohorts.",
+                "relationshipToGap": "Identifies lack of generalization across diverse cohorts.",
                 "relevanceScore": 94,
             })
             if len(evidence_1) >= 3:
                 break
 
-    # If no specific matches, ground using first available limitations or abstract chunks
     if not evidence_1 and all_limitations:
         p_id, p_title, page, text = all_limitations[0]
         evidence_1.append({
-            "paperId": p_id,
-            "section": "Limitations",
-            "page": page,
+            "paperId": p_id, "section": "Limitations", "page": page,
             "text": text[:280] + ("..." if len(text) > 280 else ""),
-            "relationshipToGap": "Highlights primary operational constraint and evaluation boundary.",
+            "relationshipToGap": "Highlights primary evaluation boundary.",
             "relevanceScore": 90,
         })
     elif not evidence_1 and papers:
@@ -80,34 +177,24 @@ def detect_candidate_gaps(papers: list[Paper], chunks_by_paper: dict[str, list[A
             "relevanceScore": 88,
         })
 
-    gap_1 = {
-        "id": new_id("gap"),
-        "projectId": project_id,
-        "type": "Repeated Limitation",
-        "confidence": 91,
+    gaps.append({
+        "id": new_id("gap"), "projectId": project_id,
+        "type": "Repeated Limitation", "confidence": 91,
         "topic": "Cross-Demographic Robustness & External Validation",
         "description": "While proposed models demonstrate strong in-distribution benchmark performance, literature consistently notes a sharp decline when models are tested across unseen populations and alternative institutional protocols.",
         "evidence": evidence_1,
         "supportingPaperIds": list({e["paperId"] for e in evidence_1}) or paper_ids[:2],
         "suggestedQuestion": "How can model architectures preserve calibration and robustness when deployed across demographically diverse, uncurated cohorts?",
         "suggestedMethodology": "Evaluate multi-site transfer learning with invariant representation regularization across stratified cohorts.",
-        "confidenceBreakdown": {
-            "evidenceFrequency": 92,
-            "futureWorkSupport": 88,
-            "methodologicalWeakness": 86,
-            "topicCoverage": 90,
-        },
-    }
-    gaps.append(gap_1)
+        "confidenceBreakdown": {"evidenceFrequency": 92, "futureWorkSupport": 88, "methodologicalWeakness": 86, "topicCoverage": 90},
+    })
 
-    # Pattern 2: Longitudinal / Real-World Prospective Deployment
+    # Pattern 2: Longitudinal / Prospective
     evidence_2 = []
     for p_id, p_title, page, text in all_future_work + all_limitations:
         if any(w in text.lower() for w in ["future", "prospective", "longitudinal", "clinical", "real-time", "deployment", "time"]):
             evidence_2.append({
-                "paperId": p_id,
-                "section": "Future Work",
-                "page": page,
+                "paperId": p_id, "section": "Future Work", "page": page,
                 "text": text[:280] + ("..." if len(text) > 280 else ""),
                 "relationshipToGap": "Identifies urgent requirement for prospective longitudinal assessment.",
                 "relevanceScore": 89,
@@ -120,8 +207,7 @@ def detect_candidate_gaps(papers: list[Paper], chunks_by_paper: dict[str, list[A
         p_chunks = chunks_by_paper.get(p2.paper_id, [])
         sample_chunk = p_chunks[-1] if p_chunks else None
         evidence_2.append({
-            "paperId": p2.paper_id,
-            "section": "Discussion",
+            "paperId": p2.paper_id, "section": "Discussion",
             "page": sample_chunk.page if sample_chunk else 1,
             "text": (sample_chunk.text[:280] if sample_chunk else p2.title),
             "relationshipToGap": "Identifies open directions for prospective validation.",
@@ -130,71 +216,24 @@ def detect_candidate_gaps(papers: list[Paper], chunks_by_paper: dict[str, list[A
     elif not evidence_2 and evidence_1:
         evidence_2.append(dict(evidence_1[0]))
 
-    gap_2 = {
-        "id": new_id("gap"),
-        "projectId": project_id,
-        "type": "Methodological Gap",
-        "confidence": 85,
+    gaps.append({
+        "id": new_id("gap"), "projectId": project_id,
+        "type": "Methodological Gap", "confidence": 85,
         "topic": "Prospective Longitudinal Trajectory Modeling",
         "description": "Existing approaches predominantly analyze static snapshots or retrospective datasets. Continuous time-series integration and prospective outcome evaluation remain largely unaddressed.",
         "evidence": evidence_2,
         "supportingPaperIds": list({e["paperId"] for e in evidence_2}) or paper_ids[:2],
         "suggestedQuestion": "What continuous-time mechanisms best account for irregularly sampled observation intervals in dynamic real-world settings?",
         "suggestedMethodology": "Neural ordinary differential equations (Neural ODEs) benchmarked against longitudinal multi-interval observational series.",
-        "confidenceBreakdown": {
-            "evidenceFrequency": 84,
-            "futureWorkSupport": 90,
-            "methodologicalWeakness": 82,
-            "topicCoverage": 84,
-        },
-    }
-    gaps.append(gap_2)
-
-    # Pattern 3: Computational efficiency & edge feasibility
-    if len(papers) >= 2:
-        evidence_3 = []
-        for p_id, p_title, page, text in all_limitations:
-            if any(w in text.lower() for w in ["compute", "memory", "resource", "latency", "scale", "parameter"]):
-                evidence_3.append({
-                    "paperId": p_id,
-                    "section": "Limitations",
-                    "page": page,
-                    "text": text[:280] + ("..." if len(text) > 280 else ""),
-                    "relationshipToGap": "Identifies scalability and resource constraints as adoption barrier.",
-                    "relevanceScore": 87,
-                })
-                if len(evidence_3) >= 2:
-                    break
-        if not evidence_3:
-            evidence_3 = [evidence_1[0]] if evidence_1 else []
-
-        gap_3 = {
-            "id": new_id("gap"),
-            "projectId": project_id,
-            "type": "Underexplored Area",
-            "confidence": 82,
-            "topic": "Resource-Constrained Edge Inference & Quantization",
-            "description": "High model parameter counts create significant latency and resource bottlenecks, restricting deployment in localized or privacy-sensitive edge environments without server offloading.",
-            "evidence": evidence_3,
-            "supportingPaperIds": list({e["paperId"] for e in evidence_3}) or paper_ids[:1],
-            "suggestedQuestion": "Can structured parameter pruning and 4-bit quantization maintain model fidelity without degrading contextual reasoning?",
-            "suggestedMethodology": "Post-training quantization and activation distillation tested under hardware memory caps.",
-            "confidenceBreakdown": {
-                "evidenceFrequency": 80,
-                "futureWorkSupport": 85,
-                "methodologicalWeakness": 81,
-                "topicCoverage": 82,
-            },
-        }
-        gaps.append(gap_3)
+        "confidenceBreakdown": {"evidenceFrequency": 84, "futureWorkSupport": 90, "methodologicalWeakness": 82, "topicCoverage": 84},
+    })
 
     return gaps
 
 
-def detect_contradictions(papers: list[Paper], analyses: dict[str, dict[str, Any]], project_id: str) -> list[dict[str, Any]]:
-    """Surface candidate conflicting claims or opposing experimental outcomes across papers."""
+def detect_contradictions_heuristic(papers: list[Paper], analyses: dict[str, dict[str, Any]], project_id: str) -> list[dict[str, Any]]:
+    """Heuristic contradiction detection fallback."""
     contradictions: list[dict[str, Any]] = []
-
     if len(papers) < 2:
         return contradictions
 
@@ -202,25 +241,187 @@ def detect_contradictions(papers: list[Paper], analyses: dict[str, dict[str, Any
     ana1 = analyses.get(p1.paper_id, {})
     ana2 = analyses.get(p2.paper_id, {})
 
-    method1 = (ana1.get("models") or ["Transformer"])[0]
-    method2 = (ana2.get("models") or ["Convolutional Neural Network"])[0]
+    method1 = (ana1.get("models") or ([ana1.get("methodology")] if ana1.get("methodology") else []) or [p1.title[:40]])[0]
+    method2 = (ana2.get("models") or ([ana2.get("methodology")] if ana2.get("methodology") else []) or [p2.title[:40]])[0]
+    dataset1 = (ana1.get("dataset") or (ana2.get("dataset") if ana2 else []) or ["Benchmark Dataset"])[0]
 
-    contra_1 = {
-        "id": new_id("contra"),
-        "projectId": project_id,
-        "topic": "Sequential Feature Extraction Efficiency vs. Local Spatial Invariance",
+    claim1 = ana1.get("findings") or f"Demonstrates that {method1} achieves superior representations and accuracy on primary evaluations."
+    claim2 = ana2.get("findings") or f"Finds that {method2} exhibits better operational efficiency and robustness under resource constraints."
+
+    contradictions.append({
+        "id": new_id("contra"), "projectId": project_id,
+        "topic": f"Methodological Trade-offs: {method1} vs. {method2}",
         "paperAId": p1.paper_id,
-        "paperAClaim": f"Demonstrates that {method1} representations capture long-range contextual dependencies more effectively with minimal feature degradation.",
+        "paperAClaim": claim1[:280],
         "paperBId": p2.paper_id,
-        "paperBClaim": f"Suggests that localized inductive biases in {method2} architectures deliver superior generalization and stability on smaller training cohorts.",
-        "experimentalContext": "Comparative benchmark evaluation under varying sample size regimes and sequence length constraints.",
-        "dataset": (ana1.get("dataset") or ["Clinical/Academic Benchmark"])[0],
+        "paperBClaim": claim2[:280],
+        "experimentalContext": f"Comparative evaluation in {dataset1} under different training regimes and constraints.",
+        "dataset": dataset1,
         "method": f"{method1} vs. {method2}",
-        "confidenceScore": 86,
-    }
-    contradictions.append(contra_1)
-
+        "confidenceScore": 85,
+    })
     return contradictions
+
+
+# ─── LLM-Powered Analysis ──────────────────────────────────────────────────
+
+async def detect_candidate_gaps_llm(papers: list[Paper], chunks_by_paper: dict[str, list[Any]], analyses: dict[str, dict[str, Any]], project_id: str) -> list[dict[str, Any]] | None:
+    """Use LLM to detect research gaps. Returns None on failure."""
+    settings = get_settings()
+    if settings.llm_provider == "fake" or not settings.llm_api_key:
+        return None
+
+    # Build context for LLM
+    paper_summaries = []
+    for paper in papers:
+        ana = analyses.get(paper.paper_id, {})
+        summary = f"Paper ID: {paper.paper_id}\nTitle: {paper.title}\n"
+        if paper.abstract:
+            summary += f"Abstract: {paper.abstract[:500]}\n"
+        if ana.get("problem"):
+            summary += f"Problem: {ana['problem']}\n"
+        if ana.get("methodology"):
+            summary += f"Methodology: {ana['methodology']}\n"
+        if ana.get("models"):
+            summary += f"Models: {', '.join(ana['models'])}\n"
+        if ana.get("findings"):
+            summary += f"Findings: {ana['findings']}\n"
+        if ana.get("limitations"):
+            summary += f"Limitations:\n" + "\n".join(f"  - {l}" for l in ana["limitations"]) + "\n"
+        if ana.get("futureWork"):
+            summary += f"Future Work:\n" + "\n".join(f"  - {f}" for f in ana["futureWork"]) + "\n"
+
+        # Add key limitation/future chunks
+        p_chunks = chunks_by_paper.get(paper.paper_id, [])
+        lim_chunks = [c for c in p_chunks if c.has_limitation_cue or c.chunk_type == "LIMITATION"]
+        fw_chunks = [c for c in p_chunks if c.has_future_cue or c.chunk_type == "FUTURE_WORK"]
+
+        if lim_chunks:
+            summary += "Limitation Chunks:\n"
+            for c in lim_chunks[:2]:
+                summary += f"  [Page {c.page}, {c.section_heading or 'Limitations'}]: {c.text[:300]}\n"
+        if fw_chunks:
+            summary += "Future Work Chunks:\n"
+            for c in fw_chunks[:2]:
+                summary += f"  [Page {c.page}, {c.section_heading or 'Future Work'}]: {c.text[:300]}\n"
+
+        paper_summaries.append(summary)
+
+    user_prompt = f"Project contains {len(papers)} papers. Analyze them for research gaps:\n\n" + "\n---\n".join(paper_summaries)
+
+    try:
+        llm = get_llm_client()
+        parsed, result = await llm.complete_json(
+            system_prompt=GAPS_SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            schema=LLMGapsOut,
+            temperature=0.1,
+            max_tokens=3000,
+        )
+        logger.info("LLM gap detection completed (model=%s, %d gaps found)", result.model, len(parsed.gaps))
+
+        gaps_data = []
+        for g in parsed.gaps:
+            gap_dict = {
+                "id": new_id("gap"),
+                "projectId": project_id,
+                "type": g.type,
+                "confidence": g.confidence,
+                "topic": g.topic,
+                "description": g.description,
+                "evidence": [e.model_dump() for e in g.evidence],
+                "supportingPaperIds": list({e.paperId for e in g.evidence if e.paperId}),
+                "suggestedQuestion": g.suggestedQuestion,
+                "suggestedMethodology": g.suggestedMethodology,
+                "confidenceBreakdown": {
+                    "evidenceFrequency": g.confidence,
+                    "futureWorkSupport": max(60, g.confidence - 5),
+                    "methodologicalWeakness": max(60, g.confidence - 8),
+                    "topicCoverage": max(60, g.confidence - 3),
+                },
+            }
+            # Ensure evidence paper IDs are valid
+            valid_paper_ids = {p.paper_id for p in papers}
+            for ev in gap_dict["evidence"]:
+                if ev["paperId"] not in valid_paper_ids and papers:
+                    ev["paperId"] = papers[0].paper_id
+            gap_dict["supportingPaperIds"] = list({e["paperId"] for e in gap_dict["evidence"]})
+            if not gap_dict["supportingPaperIds"] and papers:
+                gap_dict["supportingPaperIds"] = [papers[0].paper_id]
+            gaps_data.append(gap_dict)
+
+        return gaps_data if gaps_data else None
+    except Exception as exc:
+        logger.warning("LLM gap detection failed, falling back to heuristic: %s", exc)
+        return None
+
+
+async def detect_contradictions_llm(papers: list[Paper], analyses: dict[str, dict[str, Any]], chunks_by_paper: dict[str, list[Any]], project_id: str) -> list[dict[str, Any]] | None:
+    """Use LLM to detect contradictions. Returns None on failure."""
+    settings = get_settings()
+    if settings.llm_provider == "fake" or not settings.llm_api_key or len(papers) < 2:
+        return None
+
+    paper_summaries = []
+    for paper in papers:
+        ana = analyses.get(paper.paper_id, {})
+        summary = f"Paper ID: {paper.paper_id}\nTitle: {paper.title}\n"
+        if ana.get("problem"):
+            summary += f"Problem: {ana['problem']}\n"
+        if ana.get("methodology"):
+            summary += f"Methodology: {ana['methodology']}\n"
+        if ana.get("models"):
+            summary += f"Models: {', '.join(ana['models'])}\n"
+        if ana.get("findings"):
+            summary += f"Findings: {ana['findings']}\n"
+        if ana.get("limitations"):
+            summary += f"Limitations: " + "; ".join(ana["limitations"][:3]) + "\n"
+
+        # Add key result/finding chunks for comparison
+        p_chunks = chunks_by_paper.get(paper.paper_id, [])
+        result_chunks = [c for c in p_chunks if c.chunk_type in ("RESULTS", "DISCUSSION") or 
+                        any(h in (c.section_heading or "").lower() for h in ["result", "finding", "discussion"])]
+        if result_chunks:
+            summary += "Key Result Chunks:\n"
+            for c in result_chunks[:2]:
+                summary += f"  [Page {c.page}]: {c.text[:300]}\n"
+        paper_summaries.append(summary)
+
+    user_prompt = f"Analyze these {len(papers)} papers for contradictions or conflicting claims:\n\n" + "\n---\n".join(paper_summaries)
+
+    try:
+        llm = get_llm_client()
+        parsed, result = await llm.complete_json(
+            system_prompt=CONTRADICTIONS_SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            schema=LLMContradictionsOut,
+            temperature=0.1,
+            max_tokens=2500,
+        )
+        logger.info("LLM contradiction detection completed (model=%s, %d found)", result.model, len(parsed.contradictions))
+
+        valid_paper_ids = {p.paper_id for p in papers}
+        contras = []
+        for c in parsed.contradictions:
+            contra_dict = {
+                "id": new_id("contra"),
+                "projectId": project_id,
+                "topic": c.topic,
+                "paperAId": c.paperAId if c.paperAId in valid_paper_ids else papers[0].paper_id,
+                "paperAClaim": c.paperAClaim,
+                "paperBId": c.paperBId if c.paperBId in valid_paper_ids else papers[1].paper_id if len(papers) > 1 else papers[0].paper_id,
+                "paperBClaim": c.paperBClaim,
+                "experimentalContext": c.experimentalContext,
+                "dataset": c.dataset,
+                "method": c.method,
+                "confidenceScore": c.confidenceScore,
+            }
+            contras.append(contra_dict)
+
+        return contras if contras else None
+    except Exception as exc:
+        logger.warning("LLM contradiction detection failed, falling back to heuristic: %s", exc)
+        return None
 
 
 def compute_landscape(papers: list[Paper], analyses: dict[str, dict[str, Any]]) -> dict[str, Any]:
@@ -242,13 +443,25 @@ def compute_landscape(papers: list[Paper], analyses: dict[str, dict[str, Any]]) 
                 short_l = short_l[:57] + "..."
             limitation_counter[short_l] += 1
 
-    # Topic clusters
-    topic_data = [
-        {"name": "Neural Architectures", "x": 20, "y": 45, "z": 200, "color": "rgb(var(--accent))"},
-        {"name": "Generalization & Bias", "x": 60, "y": 80, "z": 180, "color": "rgb(var(--alert))"},
-        {"name": "Benchmark Evaluation", "x": 80, "y": 30, "z": 220, "color": "rgb(var(--success))"},
-        {"name": "Longitudinal Analysis", "x": 40, "y": 65, "z": 150, "color": "#3B82F6"},
-    ]
+    # Topic clusters derived from actual data
+    topic_data = []
+    if method_counter:
+        top_methods = method_counter.most_common(4)
+        colors = ["#6366F1", "#EF4444", "#10B981", "#3B82F6"]
+        positions = [(20, 45), (60, 80), (80, 30), (40, 65)]
+        for i, (name, count) in enumerate(top_methods):
+            topic_data.append({
+                "name": name,
+                "x": positions[i % 4][0],
+                "y": positions[i % 4][1],
+                "z": count * 100,
+                "color": colors[i % 4],
+            })
+    
+    if not topic_data:
+        topic_data = [
+            {"name": "Primary Methods", "x": 40, "y": 50, "z": 200, "color": "#6366F1"},
+        ]
 
     methods_list = [
         {"name": name, "count": count}
@@ -256,8 +469,7 @@ def compute_landscape(papers: list[Paper], analyses: dict[str, dict[str, Any]]) 
     ]
     if not methods_list:
         methods_list = [
-            {"name": "Transformers", "count": len(papers)},
-            {"name": "Deep Neural Networks", "count": max(1, len(papers) - 1)},
+            {"name": "Not yet analyzed", "count": len(papers)},
         ]
 
     limitations_list = [
@@ -266,8 +478,7 @@ def compute_landscape(papers: list[Paper], analyses: dict[str, dict[str, Any]]) 
     ]
     if not limitations_list:
         limitations_list = [
-            {"label": "Lack of external multi-center cohort validation", "count": len(papers)},
-            {"label": "High training computational and memory overhead", "count": max(1, len(papers) - 1)},
+            {"label": "Analysis pending", "count": len(papers)},
         ]
 
     return {
@@ -349,7 +560,7 @@ def generate_markdown_report(project: Any, papers: list[Paper], gaps: list[dict[
     for lim in landscape.get("repeatedLimitations", []):
         lines.append(f"- {lim['label']} ({lim['count']} citations)")
 
-    lines.append("\n---\n*Report generated by AI Research Gap Finder — strictly evidence-grounded.*")
+    lines.append("\n---\n*Report generated by AI Research Gap Finder — evidence-grounded analysis.*")
     return "\n".join(lines)
 
 
@@ -387,11 +598,17 @@ async def execute_project_research_analysis(project_id: str, db: Session) -> dic
             payload = await analyze_paper(paper.paper_id, db)
             analyses[paper.paper_id] = payload
 
-    # 1. Synthesize Gaps
-    gaps_data = detect_candidate_gaps(papers, chunks_by_paper, analyses, project_id)
+    # 1. Synthesize Gaps — try LLM first, fallback to heuristic
+    gaps_data = await detect_candidate_gaps_llm(papers, chunks_by_paper, analyses, project_id)
+    if not gaps_data:
+        gaps_data = detect_candidate_gaps_heuristic(papers, chunks_by_paper, analyses, project_id)
 
-    # 2. Synthesize Contradictions
-    contradictions_data = detect_contradictions(papers, analyses, project_id)
+    # 2. Synthesize Contradictions — try LLM first, fallback to heuristic
+    contradictions_data = await detect_contradictions_llm(papers, analyses, chunks_by_paper, project_id)
+    if not contradictions_data and len(papers) >= 2:
+        contradictions_data = detect_contradictions_heuristic(papers, analyses, project_id)
+    elif not contradictions_data:
+        contradictions_data = []
 
     # 3. Compute Landscape
     landscape_data = compute_landscape(papers, analyses)

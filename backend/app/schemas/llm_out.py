@@ -139,6 +139,6 @@ class EntailmentOut(BaseModel):
 
 class AnswerOut(BaseModel):
     """P18 — grounded_answer@1.0.0 output schema."""
-    answer: str
+    answer: str = ""
     cited_sources: list[int] = Field(default_factory=list)
     insufficient_evidence: bool = False

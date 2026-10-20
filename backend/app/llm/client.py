@@ -15,6 +15,7 @@ from app.config import get_settings
 from app.core.errors import LLMError
 from app.llm.providers.base import BaseLLMProvider, LLMResult
 from app.llm.providers.fake import FakeLLMProvider
+from app.llm.providers.gemini import GeminiProvider
 from app.llm.providers.openai_compatible import OpenAICompatibleProvider
 
 logger = logging.getLogger("rgf.llm.client")
@@ -143,6 +144,12 @@ def get_llm_client() -> LLMClient:
 
         if settings.llm_provider == "fake" or not settings.llm_api_key:
             provider = FakeLLMProvider(model_name=settings.llm_model or "fake-model")
+        elif settings.llm_provider == "gemini":
+            provider = GeminiProvider(
+                api_key=settings.llm_api_key,
+                model=settings.llm_model or "gemini-3.5-flash",
+                timeout_s=settings.llm_timeout_s,
+            )
         else:
             provider = OpenAICompatibleProvider(
                 api_key=settings.llm_api_key,

@@ -64,6 +64,11 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     shutdown_job_runner()
+    try:
+        from app.database.qdrant import close_vector_store
+        close_vector_store()
+    except Exception:
+        pass
     logger.info("Application shutdown complete")
 
 

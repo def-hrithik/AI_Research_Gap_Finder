@@ -269,3 +269,15 @@ def get_vector_store() -> QdrantVectorStore:
     if _vector_store is None:
         _vector_store = QdrantVectorStore()
     return _vector_store
+
+
+def close_vector_store() -> None:
+    """Gracefully close singleton Qdrant vector store to prevent shutdown exceptions."""
+    global _vector_store
+    if _vector_store is not None:
+        try:
+            if hasattr(_vector_store, "client") and hasattr(_vector_store.client, "close"):
+                _vector_store.client.close()
+        except Exception:
+            pass
+        _vector_store = None

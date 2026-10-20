@@ -30,7 +30,7 @@ export const GapCard: React.FC<GapCardProps> = ({ gap }) => {
 
           <div className="flex items-center gap-4 text-sm text-secondary mt-auto pt-6 border-t border-border">
             <div className="flex items-center gap-1.5 font-medium">
-              <FileText size={16} className="text-primary" /> {gap.supportingPaperIds.length} Supporting Papers
+              <FileText size={16} className="text-primary" /> {gap.supportingPaperIds?.length || 0} Supporting Papers
             </div>
             <Link to={`/gaps/${gap.id}`} className="ml-auto inline-flex items-center text-accent font-semibold opacity-0 group-hover:opacity-100 transition-opacity">
               View Evidence <ChevronRight size={16} />

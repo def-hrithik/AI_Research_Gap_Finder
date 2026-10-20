@@ -156,7 +156,20 @@ def list_project_papers(
         offset=offset,
     )
 
-    items = [to_paper_response(p) for p in papers]
+    items = []
+    for p in papers:
+        analysis_record = repos.get_latest_analysis(db, p.paper_id)
+        has_analysis = analysis_record is not None and analysis_record.status == "COMPLETED"
+        analysis_payload = analysis_record.payload if (analysis_record and analysis_record.payload) else None
+        analysis_status = analysis_record.status if analysis_record else ("COMPLETED" if p.status == "ANALYZED" else "NONE")
+        items.append(
+            to_paper_response(
+                p,
+                has_analysis=has_analysis,
+                analysis_status=analysis_status,
+                analysis=analysis_payload,
+            )
+        )
     return ListEnvelope(items=items, total=total, limit=limit, offset=offset)
 
 
@@ -231,6 +244,7 @@ def get_paper_details(
             paper,
             has_analysis=analysis_record is not None,
             analysis_status=analysis_status,
+            analysis=analysis_payload,
         ),
         analysis=analysis_payload,
         analysis_status=analysis_status,

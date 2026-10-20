@@ -59,7 +59,7 @@ def _project_to_response(project, db) -> ProjectResponse:
 
 
 @router.post("", status_code=201, response_model=ProjectResponse)
-async def create_project(body: ProjectCreate, db: DbDep) -> ProjectResponse:
+def create_project(body: ProjectCreate, db: DbDep) -> ProjectResponse:
     """Create a new project — 06 §13."""
     project_id = new_id("prj")
     project = repos.create_project(db, project_id, body.name, body.description)
@@ -67,7 +67,7 @@ async def create_project(body: ProjectCreate, db: DbDep) -> ProjectResponse:
 
 
 @router.get("", response_model=ListEnvelope[ProjectResponse])
-async def list_projects(
+def list_projects(
     db: DbDep,
     q: str | None = None,
     sort: str = Query(default="updated_at", pattern="^(updated_at|name|created_at)$"),
@@ -86,7 +86,7 @@ async def list_projects(
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)
-async def get_project(project_id: str, db: DbDep) -> ProjectResponse:
+def get_project(project_id: str, db: DbDep) -> ProjectResponse:
     """Get a single project — 06 §13."""
     project = repos.get_project(db, project_id)
     if not project:
@@ -95,7 +95,7 @@ async def get_project(project_id: str, db: DbDep) -> ProjectResponse:
 
 
 @router.delete("/{project_id}", status_code=204)
-async def delete_project(project_id: str, db: DbDep) -> None:
+def delete_project(project_id: str, db: DbDep) -> None:
     """Delete a project and cascade all data — 06 §13."""
     project = repos.get_project(db, project_id)
     if not project:

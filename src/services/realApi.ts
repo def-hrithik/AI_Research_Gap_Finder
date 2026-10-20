@@ -6,8 +6,26 @@ import type { Contradiction } from '../types/contradiction';
 
 const apiClient = axios.create({
   baseURL: '/api',
+  timeout: 15000,
   headers: { 'Content-Type': 'application/json' },
 });
+
+apiClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.code === 'ECONNABORTED' || error.message?.toLowerCase().includes('timeout')) {
+      return Promise.reject(new Error('Request timed out. The backend server took too long to respond.'));
+    }
+    if (!error.response) {
+      return Promise.reject(new Error('Unable to connect to backend server. Please verify the backend is running at http://127.0.0.1:8000.'));
+    }
+    const message =
+      error.response?.data?.detail ||
+      error.response?.data?.message ||
+      `Server error (${error.response.status})`;
+    return Promise.reject(new Error(typeof message === 'string' ? message : JSON.stringify(message)));
+  }
+);
 
 // Helper to map backend ProjectResponse to frontend Project
 function mapBackendProject(p: any): Project {
@@ -91,16 +109,20 @@ export const realApi = {
     await apiClient.delete(`/projects/${id}`);
   },
 
-  // Papers
   getPapers: async (projectId: string): Promise<Paper[]> => {
     const { data } = await apiClient.get(`/projects/${projectId}/papers`);
     const items = data.items || [];
-    return items.map((p: any) => mapBackendPaper(p));
+    return items.map((p: any) => mapBackendPaper(p, p.analysis));
   },
 
   getPaper: async (paperId: string): Promise<Paper> => {
     const { data } = await apiClient.get(`/papers/${paperId}`);
     return mapBackendPaper(data.paper, data.analysis);
+  },
+
+  analyzePaper: async (paperId: string): Promise<any> => {
+    const { data } = await apiClient.post(`/papers/${paperId}/analyze`);
+    return data;
   },
 
   uploadPaper: async (projectId: string, file: File): Promise<{ paper: Paper; job_id: string; poll_url: string }> => {

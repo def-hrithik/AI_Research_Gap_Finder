@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, ExternalLink, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, ExternalLink, ShieldCheck, Sparkles, Loader2 } from 'lucide-react';
 import { usePaper } from '../hooks/usePapers';
+import { api } from '../services/api';
 import { Button } from '../components/common/Button';
 import { Card } from '../components/common/Card';
 import { Badge } from '../components/common/Badge';
@@ -32,13 +33,27 @@ export const PaperDetailsPage: React.FC = () => {
   const { paperId } = useParams<{ paperId: string }>();
   const navigate = useNavigate();
   const { data: paper, isLoading, isError, refetch } = usePaper(paperId);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+
+  const handleRunAnalysis = async () => {
+    if (!paperId) return;
+    try {
+      setIsAnalyzing(true);
+      await api.analyzePaper(paperId);
+      await refetch();
+    } catch (err) {
+      console.error('Analysis failed:', err);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
 
   if (isLoading) return <LoadingState message="Loading paper analysis..." className="mt-20" />;
   if (isError || !paper) return <ErrorState onRetry={refetch} className="mt-20" />;
 
   if (!paper.analysis) {
     return (
-      <div className="max-w-3xl mx-auto mt-20 text-center space-y-3">
+      <div className="max-w-3xl mx-auto mt-20 text-center space-y-4">
         <Button variant="ghost" onClick={() => navigate(-1)} className="gap-2 px-0 hover:bg-transparent text-secondary hover:text-primary">
           <ArrowLeft size={18} /> Back to Project
         </Button>
@@ -48,9 +63,15 @@ export const PaperDetailsPage: React.FC = () => {
             ? 'This paper is still being analyzed. Check back shortly.'
             : 'This paper has not been analyzed yet.'}
         </p>
-        <Badge variant={paper.analysisStatus === 'processing' ? 'accent' : 'default'}>
-          {paper.analysisStatus}
-        </Badge>
+        <div className="flex justify-center gap-3 items-center">
+          <Badge variant={paper.analysisStatus === 'processing' ? 'accent' : 'default'}>
+            {paper.analysisStatus}
+          </Badge>
+          <Button onClick={handleRunAnalysis} disabled={isAnalyzing} className="gap-2">
+            {isAnalyzing ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+            {isAnalyzing ? 'Analyzing with Gemini...' : 'Analyze with Gemini AI'}
+          </Button>
+        </div>
       </div>
     );
   }
@@ -72,9 +93,21 @@ export const PaperDetailsPage: React.FC = () => {
               <span>{paper.year}</span>
             </div>
 
-            <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
-              Structured Extraction
-            </h2>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold flex items-center gap-2">
+                Structured Extraction
+              </h2>
+              <Button 
+                variant="secondary" 
+                size="sm" 
+                onClick={handleRunAnalysis} 
+                disabled={isAnalyzing} 
+                className="gap-2 text-xs"
+              >
+                {isAnalyzing ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                {isAnalyzing ? 'Re-analyzing...' : 'Re-run Gemini AI Analysis'}
+              </Button>
+            </div>
 
             <AnalysisSection 
               title="Core Problem & Objective" 

@@ -28,7 +28,13 @@ import { GapDetailsPage } from './pages/GapDetailsPage';
 import { ReportsPage } from './pages/ReportsPage';
 
 const queryClient = new QueryClient({
-  defaultOptions: { queries: { staleTime: 1000 * 60 * 5, retry: 1 } },
+  defaultOptions: {
+    queries: {
+      staleTime: 1000 * 60 * 5,
+      retry: 1,
+      retryDelay: 1000,
+    },
+  },
 });
 
 export default function App() {

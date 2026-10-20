@@ -186,20 +186,41 @@ def _run_ingest_pipeline(
 
         # --- Stage 6: STRUCTURED ANALYSIS ---
         try:
-            from app.services.analysis_service import extract_paper_analysis_heuristically
-            analysis_payload = extract_paper_analysis_heuristically(paper, chunks)
+            import asyncio
+            from app.services.analysis_service import (
+                analyze_paper_with_llm,
+                extract_paper_analysis_heuristically,
+            )
+
+            analysis_payload = None
+            llm_model = "heuristic-extractor"
+
+            # Attempt LLM analysis if API key is present
+            if settings.llm_provider != "fake" and settings.llm_api_key:
+                try:
+                    # Ingest pipeline runs in thread pool, so asyncio.run is safe
+                    analysis_payload = asyncio.run(analyze_paper_with_llm(paper, chunks))
+                    if analysis_payload:
+                        llm_model = settings.llm_model
+                except Exception as llm_err:
+                    logger.warning("LLM analysis failed on ingest for %s: %s", paper_id, llm_err)
+
+            # Heuristic fallback if LLM not configured or failed
+            if not analysis_payload:
+                analysis_payload = extract_paper_analysis_heuristically(paper, chunks)
+
             ana_id = new_id("ana")
             repos.create_analysis(
                 db=db,
                 analysis_id=ana_id,
                 paper_id=paper_id,
                 prompt_version="1.0.0",
-                llm_model="heuristic-extractor",
+                llm_model=llm_model,
                 payload=analysis_payload,
                 status="COMPLETED",
             )
             repos.update_paper_status(db, paper_id, status="ANALYZED")
-            logger.info("Paper %s structured analysis completed", paper_id)
+            logger.info("Paper %s structured analysis completed (model=%s)", paper_id, llm_model)
         except Exception as ana_err:
             logger.warning("Auto-analysis failed for %s (non-fatal): %s", paper_id, ana_err)
 

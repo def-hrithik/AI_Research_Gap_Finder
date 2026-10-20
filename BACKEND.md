@@ -7,7 +7,8 @@
 [![Python](https://img.shields.io/badge/Language-Python%203.11%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Pydantic](https://img.shields.io/badge/Validation-Pydantic%20v2-E92063?style=flat-square&logo=pydantic&logoColor=white)](https://docs.pydantic.dev/)
 [![SQLAlchemy](https://img.shields.io/badge/ORM-SQLAlchemy%202.0-D71F00?style=flat-square)](https://www.sqlalchemy.org/)
-[![Pytest](https://img.shields.io/badge/Testing-Pytest%2021%20Passed-brightgreen?style=flat-square&logo=pytest&logoColor=white)](https://pytest.org/)
+[![Pytest](https://img.shields.io/badge/Testing-Pytest%2026%20Passed%20(100%25)-brightgreen?style=flat-square&logo=pytest&logoColor=white)](https://pytest.org/)
+[![LLM Provider](https://img.shields.io/badge/LLM-Google%20GenAI%20%7C%20OpenAI-9333EA?style=flat-square)](https://ai.google.dev/)
 
 [← Back to README](./README.md) • [RAG Model Specification](./RAGMODEL.md) • [System Architecture](./SYSTEMARCHITECTURE.md)
 
@@ -41,7 +42,8 @@ The Nexus AI backend is engineered as an asynchronous, high-throughput literatur
 
 1. **No Business Logic in Routes**: Route handlers in `app/api/` are thin controllers responsible only for dependency injection, schema validation, and status mapping.
 2. **No Database Dependencies in Algorithms**: Services (`ingest_service`, `search_service`, `research_service`) accept plain data models or query parameters, interacting with databases solely through repository abstractions in `app/database/repos.py`.
-3. **Fail-Fast Configuration**: All environment configurations are validated at boot time via Pydantic-settings, preventing silent runtime failures.
+3. **Fail-Fast Configuration**: All environment configurations are validated at boot time via Pydantic-settings, resolving `.env` from either the repo root or `backend/` directory.
+4. **Non-Blocking Threadpool Dispatch**: Synchronous SQLite operations run inside standard `def` routes to allow FastAPI's `run_in_threadpool` to handle blocking disk I/O without starving the main asyncio event loop.
 
 ---
 
@@ -56,7 +58,7 @@ backend/
 │   │   ├── health.py           # Health check & version endpoint
 │   │   ├── jobs.py             # Asynchronous task polling routes
 │   │   ├── papers.py           # Paper upload, catalog & PDF serving
-│   │   ├── projects.py         # Project workspace CRUD
+│   │   ├── projects.py         # Project workspace CRUD (threaded def endpoints)
 │   │   ├── research.py         # Gaps, contradictions, landscape & reports
 │   │   └── search.py           # Semantic search & grounded Q&A
 │   ├── core/                   # Shared cross-cutting primitives
@@ -70,7 +72,7 @@ backend/
 │   │   ├── models.py           # 11 SQLAlchemy 2.0 ORM models
 │   │   ├── qdrant.py           # Qdrant vector client & collection init
 │   │   ├── repos.py            # Encapsulated query repository functions
-│   │   └── session.py          # Engine, sessionmaker & DB initialization
+│   │   └── session.py          # Engine, sessionmaker, SQLite WAL & busy timeouts
 │   ├── embeddings/             # Dense vector generation
 │   │   └── embedder.py         # BAAI/bge-m3 SentenceTransformer client
 │   ├── ingestion/              # Document parsing & structural chunking
@@ -79,8 +81,11 @@ backend/
 │   │   ├── pdf_parser.py       # PyMuPDF 2-column layout parser
 │   │   └── section_detector.py # Canonical discourse section mapping
 │   ├── llm/                    # Generative inference abstraction
-│   │   ├── client.py           # Provider-agnostic client with retries
-│   │   └── providers/          # Vendor implementations (openai, fake)
+│   │   ├── client.py           # Provider-agnostic client with retries & fallback
+│   │   └── providers/          # Vendor implementations
+│   │       ├── gemini.py       # Google GenAI SDK (Gemini 2.5 Flash/Lite fallback)
+│   │       ├── openai.py       # OpenAI-compatible / local LLM integration
+│   │       └── fake.py         # Deterministic mock provider for unit tests
 │   ├── retrieval/              # Multi-stage hybrid search
 │   │   ├── bm25.py             # In-memory Okapi BM25 index & cache
 │   │   ├── evidence_selector.py# Token budgeter & context builder
@@ -88,6 +93,7 @@ backend/
 │   │   ├── intent.py           # Query classification rules
 │   │   └── reranker.py         # Cross-Encoder (bge-reranker-v2-m3)
 │   ├── schemas/                # Pydantic v2 validation contracts
+│   │   ├── analysis_llm.py     # Structured Pydantic extraction schemas
 │   │   ├── chunk.py            # Chunk & section schemas
 │   │   ├── common.py           # Error, pagination & status schemas
 │   │   ├── job.py              # Background job polling contracts
@@ -96,7 +102,7 @@ backend/
 │   │   ├── project.py          # Workspace project schemas
 │   │   └── retrieval.py        # Search query & source schemas
 │   ├── services/               # Pure domain business logic
-│   │   ├── analysis_service.py # Paper analysis extraction
+│   │   ├── analysis_service.py # Paper analysis extraction & LLM fallback
 │   │   ├── ingest_service.py   # Document parsing & indexing pipeline
 │   │   ├── job_service.py      # In-process asyncio task runner
 │   │   ├── research_service.py # Gaps, landscape & report synthesis
@@ -108,7 +114,10 @@ backend/
 │   ├── uploads/                # Saved PDF binary files
 │   └── rgf.db                  # SQLite database file
 ├── tests/                      # Automated test suite
-│   ├── unit/                   # Fast isolated unit tests (21 tests)
+│   ├── unit/                   # Fast isolated unit tests (26 tests)
+│   │   ├── api/                # Route & envelope tests (test_projects_and_health.py)
+│   │   ├── core/               # Cryptographic IDs, text normalization, constants
+│   │   └── ingestion/          # PDF parsing, section detection, sentence chunking
 │   └── test_e2e_pipeline.py    # Complete integration pipeline test
 ├── Dockerfile                  # Production container definition
 ├── pyproject.toml              # Pytest, Ruff & MyPy configurations
@@ -389,13 +398,13 @@ All settings are managed via [app/config.py](file:///c:/Users/admin/Desktop/majo
 | :--- | :--- | :--- | :--- |
 | `ENVIRONMENT` | `str` | `development` | Environment tier: `development`, `test`, `production`. |
 | `LOG_LEVEL` | `str` | `INFO` | Logging threshold: `DEBUG`, `INFO`, `WARNING`, `ERROR`. |
-| `DATABASE_URL` | `str` | `sqlite:///./data/rgf.db` | SQLAlchemy connection string (SQLite or PostgreSQL). |
+| `DATABASE_URL` | `str` | `sqlite:///./data/rgf.db` | SQLAlchemy connection string (SQLite WAL or PostgreSQL). |
 | `DATA_DIR` | `str` | `./data` | Directory for uploads, local Qdrant, and databases. |
 | `CORS_ORIGINS` | `str` | `http://localhost:5173` | Comma-separated allowed CORS origins. |
 | `MAX_UPLOAD_MB` | `int` | `25` | Maximum allowed upload size per PDF file. |
-| `LLM_PROVIDER` | `str` | `openai_compatible` | Inference provider: `openai_compatible`, `anthropic`, `fake`. |
+| `LLM_PROVIDER` | `str` | `gemini` | Inference provider: `gemini`, `openai_compatible`, `anthropic`, `fake`. |
 | `LLM_API_KEY` | `str` | `""` | API key for LLM calls (required if provider is not fake). |
-| `LLM_MODEL` | `str` | `gpt-4o-mini` | Generative model name. |
+| `LLM_MODEL` | `str` | `gemini-2.5-flash-lite` | Generative model name (e.g. `gemini-2.5-flash`, `gpt-4o-mini`). |
 | `EMBEDDING_MODEL` | `str` | `BAAI/bge-m3` | SentenceTransformers model for dense embeddings. |
 | `QDRANT_LOCAL_PATH` | `str` | `./data/qdrant` | Path to local embedded Qdrant database directory. |
 
@@ -403,13 +412,20 @@ All settings are managed via [app/config.py](file:///c:/Users/admin/Desktop/majo
 
 ## 15. Test Suite & Verification Commands
 
-### 1. Run Unit Tests (21 Tests)
+### 1. Run Unit & Endpoint Regression Tests (26 Tests)
 ```bash
 cd backend
 pytest -v tests/unit
 ```
 ```text
-============================= 21 passed in 2.16s ==============================
+tests/unit/api/test_projects_and_health.py::test_health_endpoint PASSED  [  3%]
+tests/unit/api/test_projects_and_health.py::test_projects_empty_database PASSED [  7%]
+tests/unit/api/test_projects_and_health.py::test_create_and_retrieve_project PASSED [ 11%]
+tests/unit/api/test_projects_and_health.py::test_get_nonexistent_project_returns_404 PASSED [ 15%]
+tests/unit/api/test_projects_and_health.py::test_project_delete PASSED   [ 19%]
+tests/unit/core/test_core.py (16 tests) PASSED                           [ 80%]
+tests/unit/ingestion/test_ingestion.py (5 tests) PASSED                  [100%]
+======================= 26 passed, 1 warning in 13.14s ========================
 ```
 
 ### 2. Run Comprehensive End-to-End Pipeline Test
